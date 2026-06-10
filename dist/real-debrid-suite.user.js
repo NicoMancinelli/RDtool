@@ -1,7 +1,9 @@
 // ==UserScript==
-// @name         Real-Debrid Suite (v37)
+// @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      37.0
+// @version      38.0
+// @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
+// @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
 // @author       Neek
 // @match        *://*/*
@@ -16,418 +18,10 @@
 // ==/UserScript==
 
 (function() {
-    'use strict';
+'use strict';
 
-    // =========================================================================
-    // Config Module
-    // =========================================================================
-
-    const Config = {
-        BASE_HOSTS: [
-            '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
-            'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',
-            'youtube\\.com\\/watch\\?v\\=[a-zA-Z0-9]{11,11}', 'turbobit\\.net\\/[a-z0-9]{12,12}', 'uploaded\\.net\\/file\\/[a-z0-9]{8,8}',
-            'zippyshare\\.com\\/v\\/[a-zA-Z0-9]{8,8}\\/file', 'k2s\\.cc\\/file\\/', 'keep2share\\.cc\\/file\\/',
-            'nitroflare\\.com\\/view\\/[A-Z0-9]{15,15}', 'pixeldrain\\.com\\/u\\/[a-zA-Z0-9]+', 'ddownload\\.com\\/[a-zA-Z0-9]+',
-            'katfile\\.com\\/[a-zA-Z0-9]+', 'gofile\\.io\\/d\\/[a-zA-Z0-9]+', 'qiwi\\.gg\\/file\\/[a-zA-Z0-9\\-]+'
-        ],
-
-        defaultSettings: {
-            hijack: false,
-            autoShow: true,
-            magnetAction: 'smart',
-            filterExts: 'nfo, txt, url, jpg, png, md, srt',
-            smartFilter: false,
-            autoCleanup: false,
-            defaultAction: 'dl',
-            extPlayer: 'browser',
-            customHosts: '',
-            exportFormat: 'raw',
-            notificationSound: false
-        },
-
-        isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
-
-        getKey() {
-            const gmKey = GM_getValue('rd_api_key', '');
-            if (gmKey) return gmKey;
-            const lsKey = localStorage.getItem('rd_api_key_backup');
-            return lsKey || '';
-        },
-
-        saveKey(key) {
-            if (!key || key.trim().length < 5) return;
-            GM_setValue('rd_api_key', key.trim());
-            localStorage.setItem('rd_api_key_backup', key.trim());
-            State.apiKey = key.trim();
-        },
-
-        clearKey() {
-            GM_setValue('rd_api_key', '');
-            localStorage.removeItem('rd_api_key_backup');
-            State.apiKey = '';
-        },
-
-        getActiveRegex() {
-            const allHosts = [...this.BASE_HOSTS];
-
-            // Add dynamic hosts
-            if (State.dynamicHosts && State.dynamicHosts.length) {
-                State.dynamicHosts.forEach(h => {
-                    allHosts.push(h.replace(/\./g, '\\.'));
-                });
-            }
-
-            // Add custom hosts from settings
-            if (State.settings && State.settings.customHosts) {
-                State.settings.customHosts.split(',').map(h => h.trim()).filter(Boolean).forEach(h => {
-                    allHosts.push(h.replace(/\./g, '\\.'));
-                });
-            }
-
-            return new RegExp('\\b(' + allHosts.join('|') + ')', 'i');
-        },
-
-        hostRegex: null
-    };
-
-    // =========================================================================
-    // State Module
-    // =========================================================================
-
-    const State = {
-        apiKey: '',
-        settings: {},
-        currentTab: 'links',
-        isExpanded: false,
-        isMobile: false,
-        // Data
-        linkHistory: [],
-        cachedTorrents: [],
-        cachedCloud: [],
-        scannedLinksMap: new Map(),
-        dynamicHosts: [],
-        liveHosts: {},
-        userProfile: null,
-        trafficData: null,
-        // Transient
-        processedUrls: new Set(),
-        completedTorrentsMemory: new Set(),
-        isFirstTorrentFetch: true,
-        torrentRefreshInterval: null,
-        magnetCacheQueue: [],
-        cacheCheckTimer: null,
-        deepScanEnabled: false,
-        // Session
-        sessionStats: { processed: 0 },
-        lastUrl: location.href
-    };
-
-    // =========================================================================
-    // State Initialization
-    // =========================================================================
-
-    State.apiKey = Config.getKey();
-    State.isMobile = Config.isMobile;
-
-    // Validate and load settings
-    const savedSettings = JSON.parse(GM_getValue('rd_settings', '{}'));
-    State.settings = {};
-    for (const key of Object.keys(Config.defaultSettings)) {
-        State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
-    }
-
-    // Load and validate history (cap at 500)
-    try {
-        const hist = JSON.parse(GM_getValue('rd_link_history', '[]'));
-        State.linkHistory = Array.isArray(hist) ? hist.filter(h => h && h.type).slice(-500) : [];
-    } catch(e) { State.linkHistory = []; }
-
-    // Load dynamic hosts
-    try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
-
-    // Now build the host regex
-    Config.hostRegex = Config.getActiveRegex();
-
-    // =========================================================================
-    // Utility Functions
-    // =========================================================================
-
-    function saveSettings() { GM_setValue('rd_settings', JSON.stringify(State.settings)); }
-
-    function formatBytes(bytes) {
-        if (!bytes || bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    }
-
-    function decodeBase64Heuristic(text) {
-        const b64Regex = /([A-Za-z0-9+\/]{30,}={0,2})/g;
-        return text.replace(b64Regex, (match) => {
-            try {
-                const decoded = atob(match);
-                if (/^https?:\/\//i.test(decoded) || /^magnet:\?/i.test(decoded)) return decoded;
-            } catch(e) {}
-            return match;
-        });
-    }
-
-    function getStreamUrl(url) {
-        if (State.settings.extPlayer === 'vlc') return 'vlc://' + url;
-        if (State.settings.extPlayer === 'iina') return 'iina://weblink?url=' + url;
-        if (State.settings.extPlayer === 'infuse') return 'infuse://x-callback-url/play?url=' + encodeURIComponent(url);
-        return url;
-    }
-
-    // =========================================================================
-    // API Module
-    // =========================================================================
-
-    const API = {
-        _queue: [],
-        _activeCount: 0,
-        _maxPerSec: 4,
-        _BASE: 'https://api.real-debrid.com/rest/1.0',
-
-        _enqueue(fn) {
-            return new Promise((resolve, reject) => {
-                this._queue.push(() => fn().then(resolve, reject));
-                this._drain();
-            });
-        },
-
-        _drain() {
-            while (this._activeCount < this._maxPerSec && this._queue.length) {
-                const task = this._queue.shift();
-                this._activeCount++;
-                const started = Date.now();
-                task().finally(() => {
-                    const elapsed = Date.now() - started;
-                    const wait = Math.max(0, 250 - elapsed);
-                    setTimeout(() => {
-                        this._activeCount--;
-                        this._drain();
-                    }, wait);
-                });
-            }
-        },
-
-        request(method, endpoint, data, _retried) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
-
-            return this._enqueue(() => new Promise((resolve) => {
-                const url = this._BASE + endpoint;
-                const headers = { 'Authorization': 'Bearer ' + State.apiKey };
-                let body = undefined;
-
-                if (method === 'POST' && data) {
-                    headers['Content-Type'] = 'application/x-www-form-urlencoded';
-                    body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
-                }
-
-                GM_xmlhttpRequest({
-                    method: method,
-                    url: url,
-                    headers: headers,
-                    data: body,
-                    onload: (resp) => {
-                        const status = resp.status;
-
-                        // Auth errors
-                        if (status === 401 || status === 403) {
-                            Config.clearKey();
-                            return resolve({ ok: false, error: 'Auth Error' });
-                        }
-
-                        // Rate limit — retry once
-                        if (status === 429 && !_retried) {
-                            const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, retryAfter * 1000);
-                        }
-
-                        // Service unavailable — retry once after 2s
-                        if (status === 503 && !_retried) {
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, 2000);
-                        }
-
-                        // Other errors
-                        if (status >= 400) {
-                            return resolve({ ok: false, error: 'API: ' + status });
-                        }
-
-                        // Success — parse JSON (handle empty responses from DELETE etc.)
-                        const text = (resp.responseText || '').trim();
-                        if (!text) {
-                            resolve({ ok: true, data: null });
-                        } else {
-                            try {
-                                resolve({ ok: true, data: JSON.parse(text) });
-                            } catch(e) {
-                                resolve({ ok: false, error: 'Parse Error' });
-                            }
-                        }
-                    },
-                    onerror: () => {
-                        resolve({ ok: false, error: 'Network Error' });
-                    }
-                });
-            }));
-        },
-
-        get(endpoint) {
-            return this.request('GET', endpoint);
-        },
-
-        post(endpoint, data) {
-            return this.request('POST', endpoint, data);
-        },
-
-        del(endpoint) {
-            return this.request('DELETE', endpoint);
-        },
-
-        upload(endpoint, file) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
-
-            return this._enqueue(() => new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    const arrayBuffer = reader.result;
-                    const uint8 = new Uint8Array(arrayBuffer);
-                    const boundary = '----RDSuite' + Date.now().toString(36) + Math.random().toString(36).slice(2);
-                    const encoder = new TextEncoder();
-
-                    // Build multipart body
-                    const header = '--' + boundary + '\r\n' +
-                        'Content-Disposition: form-data; name="file"; filename="' + file.name + '"\r\n' +
-                        'Content-Type: application/octet-stream\r\n\r\n';
-                    const footer = '\r\n--' + boundary + '--\r\n';
-
-                    const headerBytes = encoder.encode(header);
-                    const footerBytes = encoder.encode(footer);
-
-                    // Combine into single Uint8Array
-                    const body = new Uint8Array(headerBytes.length + uint8.length + footerBytes.length);
-                    body.set(headerBytes, 0);
-                    body.set(uint8, headerBytes.length);
-                    body.set(footerBytes, headerBytes.length + uint8.length);
-
-                    GM_xmlhttpRequest({
-                        method: 'PUT',
-                        url: this._BASE + endpoint,
-                        headers: {
-                            'Authorization': 'Bearer ' + State.apiKey,
-                            'Content-Type': 'multipart/form-data; boundary=' + boundary
-                        },
-                        data: body.buffer,
-                        onload: (resp) => {
-                            const status = resp.status;
-
-                            if (status === 401 || status === 403) {
-                                Config.clearKey();
-                                return resolve({ ok: false, error: 'Auth Error' });
-                            }
-
-                            if (status >= 400) {
-                                return resolve({ ok: false, error: 'API: ' + status });
-                            }
-
-                            const text = (resp.responseText || '').trim();
-                            if (!text) {
-                                resolve({ ok: true, data: null });
-                            } else {
-                                try {
-                                    resolve({ ok: true, data: JSON.parse(text) });
-                                } catch(e) {
-                                    resolve({ ok: false, error: 'Parse Error' });
-                                }
-                            }
-                        },
-                        onerror: () => {
-                            resolve({ ok: false, error: 'Network Error' });
-                        }
-                    });
-                };
-                reader.onerror = () => {
-                    resolve({ ok: false, error: 'File Read Error' });
-                };
-                reader.readAsArrayBuffer(file);
-            }));
-        }
-    };
-
-    // --- DOM Helper Module ---
-    const DOM = {
-        create(tag, attrs = {}, children = []) {
-            const el = document.createElement(tag);
-            for (const [key, value] of Object.entries(attrs)) {
-                if (key === 'className') {
-                    el.className = value;
-                } else if (key === 'textContent') {
-                    el.textContent = value;
-                } else if (key === 'htmlContent') {
-                    el.innerHTML = value;
-                } else if (key === 'style' && typeof value === 'object') {
-                    for (const [prop, val] of Object.entries(value)) {
-                        el.style[prop] = val;
-                    }
-                } else if (key === 'style' && typeof value === 'string') {
-                    el.style.cssText = value;
-                } else if (key === 'dataset' && typeof value === 'object') {
-                    for (const [dk, dv] of Object.entries(value)) {
-                        el.dataset[dk] = dv;
-                    }
-                } else if (key.startsWith('on') && typeof value === 'function') {
-                    el.addEventListener(key.slice(2).toLowerCase(), value);
-                } else {
-                    el.setAttribute(key, value);
-                }
-            }
-            DOM._appendChildren(el, children);
-            return el;
-        },
-
-        text(str) {
-            return document.createTextNode(str);
-        },
-
-        fragment(children) {
-            const frag = document.createDocumentFragment();
-            DOM._appendChildren(frag, children);
-            return frag;
-        },
-
-        clear(el) {
-            while (el.firstChild) el.removeChild(el.firstChild);
-        },
-
-        _appendChildren(parent, children) {
-            for (const child of children) {
-                if (child == null) continue;
-                if (Array.isArray(child)) {
-                    DOM._appendChildren(parent, child);
-                } else if (typeof child === 'string') {
-                    parent.appendChild(document.createTextNode(child));
-                } else if (child instanceof Node) {
-                    parent.appendChild(child);
-                }
-            }
-        }
-    };
-
-    // =========================================================================
-    // UI Shell — Styles + FAB + Dashboard Frame + Toasts + Modals
-    // =========================================================================
-
-    // --- Step 1: CSS via GM_addStyle ---
-    GM_addStyle(`
-        :root {
+// --- Step 1: CSS via GM_addStyle ---
+GM_addStyle(`:root {
             --rd-bg-base: #0a0a0a;
             --rd-bg-glass: rgba(255, 255, 255, 0.08);
             --rd-bg-glass-hover: rgba(255, 255, 255, 0.12);
@@ -514,7 +108,7 @@
             right: 30px;
             width: 400px;
             max-height: 580px;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass));
             backdrop-filter: var(--rd-glass-blur);
             -webkit-backdrop-filter: var(--rd-glass-blur);
             border-radius: var(--rd-radius-lg);
@@ -584,6 +178,9 @@
             background: var(--rd-bg-glass);
             color: var(--rd-accent);
             box-shadow: var(--rd-glass-highlight);
+        }
+        .rd-tab:active {
+            background: var(--rd-bg-glass-active);
         }
 
         /* Content */
@@ -685,6 +282,32 @@
         }
         .rd-input-btn.primary:hover {
             background: #8bc4ff;
+        }
+        .rd-input-btn:active {
+            background: var(--rd-bg-glass-active);
+        }
+        .rd-input-btn.danger {
+            background: var(--rd-danger);
+            color: var(--rd-bg-base);
+            border: none;
+        }
+        .rd-input-btn.danger:hover {
+            background: #f5a8a0;
+        }
+        .rd-input-btn.success {
+            background: var(--rd-success);
+            color: var(--rd-bg-base);
+            border: none;
+        }
+
+        /* Settings rows */
+        .rd-account-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--rd-glass-border);
+            font-size: 12px;
         }
 
         /* List items (glass cards) */
@@ -1166,10 +789,423 @@
         @keyframes popIn {
             0% { transform: scale(0.8) translate(-50%, -100%); opacity: 0; }
             100% { transform: scale(1) translate(-50%, -100%); opacity: 1; }
-        }
-    `);
+        }`);
 
-    // --- Step 2: UI Module ---
+// Config Module
+    // =========================================================================
+
+    const Config = {
+        BASE_HOSTS: [
+            '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
+            'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',
+            'youtube\\.com\\/watch\\?v\\=[a-zA-Z0-9]{11,11}', 'turbobit\\.net\\/[a-z0-9]{12,12}', 'uploaded\\.net\\/file\\/[a-z0-9]{8,8}',
+            'zippyshare\\.com\\/v\\/[a-zA-Z0-9]{8,8}\\/file', 'k2s\\.cc\\/file\\/', 'keep2share\\.cc\\/file\\/',
+            'nitroflare\\.com\\/view\\/[A-Z0-9]{15,15}', 'pixeldrain\\.com\\/u\\/[a-zA-Z0-9]+', 'ddownload\\.com\\/[a-zA-Z0-9]+',
+            'katfile\\.com\\/[a-zA-Z0-9]+', 'gofile\\.io\\/d\\/[a-zA-Z0-9]+', 'qiwi\\.gg\\/file\\/[a-zA-Z0-9\\-]+'
+        ],
+
+        defaultSettings: {
+            hijack: false,
+            autoShow: true,
+            magnetAction: 'smart',
+            filterExts: 'nfo, txt, url, jpg, png, md, srt',
+            smartFilter: false,
+            autoCleanup: false,
+            defaultAction: 'dl',
+            extPlayer: 'browser',
+            customHosts: '',
+            exportFormat: 'raw',
+            notificationSound: false,
+            deepScan: false
+        },
+
+        isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
+
+        getKey() {
+            const gmKey = GM_getValue('rd_api_key', '');
+            if (gmKey) return gmKey;
+            const lsKey = localStorage.getItem('rd_api_key_backup');
+            return lsKey || '';
+        },
+
+        saveKey(key) {
+            if (!key || key.trim().length < 5) return;
+            GM_setValue('rd_api_key', key.trim());
+            localStorage.setItem('rd_api_key_backup', key.trim());
+            State.apiKey = key.trim();
+        },
+
+        clearKey() {
+            GM_setValue('rd_api_key', '');
+            localStorage.removeItem('rd_api_key_backup');
+            State.apiKey = '';
+        },
+
+        getActiveRegex() {
+            const allHosts = [...this.BASE_HOSTS];
+
+            // Add dynamic hosts
+            if (State.dynamicHosts && State.dynamicHosts.length) {
+                State.dynamicHosts.forEach(h => {
+                    allHosts.push(h.replace(/\./g, '\\.'));
+                });
+            }
+
+            // Add custom hosts from settings
+            if (State.settings && State.settings.customHosts) {
+                State.settings.customHosts.split(',').map(h => h.trim()).filter(Boolean).forEach(h => {
+                    allHosts.push(h.replace(/\./g, '\\.'));
+                });
+            }
+
+            return new RegExp('\\b(' + allHosts.join('|') + ')', 'i');
+        },
+
+        hostRegex: null
+    };
+
+    // =========================================================================
+
+
+// State Module
+    // =========================================================================
+
+    const State = {
+        apiKey: '',
+        settings: {},
+        currentTab: 'links',
+        isExpanded: false,
+        isMobile: false,
+        // Data
+        linkHistory: [],
+        cachedTorrents: [],
+        cachedCloud: [],
+        scannedLinksMap: new Map(),
+        dynamicHosts: [],
+        liveHosts: {},
+        userProfile: null,
+        trafficData: null,
+        // Transient
+        processedUrls: new Set(),
+        completedTorrentsMemory: new Set(),
+        isFirstTorrentFetch: true,
+        torrentRefreshInterval: null,
+        magnetCacheQueue: [],
+        cacheCheckTimer: null,
+        // Session
+        sessionStats: { processed: 0 },
+        lastUrl: location.href
+    };
+
+    // =========================================================================
+    // State Initialization
+    // =========================================================================
+
+    State.apiKey = Config.getKey();
+    State.isMobile = Config.isMobile;
+
+    // Validate and load settings
+    const savedSettings = JSON.parse(GM_getValue('rd_settings', '{}'));
+    State.settings = {};
+    for (const key of Object.keys(Config.defaultSettings)) {
+        State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
+    }
+
+    // Load and validate history (cap at 500)
+    try {
+        const hist = JSON.parse(GM_getValue('rd_link_history', '[]'));
+        State.linkHistory = Array.isArray(hist) ? hist.filter(h => h && h.type).slice(-500) : [];
+    } catch(e) { State.linkHistory = []; }
+
+    // Load dynamic hosts
+    try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
+
+    // Now build the host regex
+    Config.hostRegex = Config.getActiveRegex();
+
+    // =========================================================================
+
+
+// Utility Functions
+    // =========================================================================
+
+    function saveSettings() { GM_setValue('rd_settings', JSON.stringify(State.settings)); }
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function decodeBase64Heuristic(text) {
+        const b64Regex = /([A-Za-z0-9+\/]{30,}={0,2})/g;
+        return text.replace(b64Regex, (match) => {
+            try {
+                const decoded = atob(match);
+                if (/^https?:\/\//i.test(decoded) || /^magnet:\?/i.test(decoded)) return decoded;
+            } catch(e) {}
+            return match;
+        });
+    }
+
+    function getStreamUrl(url) {
+        if (State.settings.extPlayer === 'vlc') return 'vlc://' + url;
+        if (State.settings.extPlayer === 'iina') return 'iina://weblink?url=' + url;
+        if (State.settings.extPlayer === 'infuse') return 'infuse://x-callback-url/play?url=' + encodeURIComponent(url);
+        return url;
+    }
+
+    // =========================================================================
+
+
+// API Module
+    // =========================================================================
+
+    const API = {
+        _queue: [],
+        _activeCount: 0,
+        _maxPerSec: 4,
+        _BASE: 'https://api.real-debrid.com/rest/1.0',
+
+        _enqueue(fn) {
+            return new Promise((resolve, reject) => {
+                this._queue.push(() => fn().then(resolve, reject));
+                this._drain();
+            });
+        },
+
+        _drain() {
+            while (this._activeCount < this._maxPerSec && this._queue.length) {
+                const task = this._queue.shift();
+                this._activeCount++;
+                const started = Date.now();
+                task().finally(() => {
+                    const elapsed = Date.now() - started;
+                    const wait = Math.max(0, 250 - elapsed);
+                    setTimeout(() => {
+                        this._activeCount--;
+                        this._drain();
+                    }, wait);
+                });
+            }
+        },
+
+        request(method, endpoint, data, _retried) {
+            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+
+            return this._enqueue(() => new Promise((resolve) => {
+                const url = this._BASE + endpoint;
+                const headers = { 'Authorization': 'Bearer ' + State.apiKey };
+                let body = undefined;
+
+                if (method === 'POST' && data) {
+                    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                    body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
+                }
+
+                GM_xmlhttpRequest({
+                    method: method,
+                    url: url,
+                    headers: headers,
+                    data: body,
+                    onload: (resp) => {
+                        const status = resp.status;
+
+                        // Auth errors
+                        if (status === 401 || status === 403) {
+                            Config.clearKey();
+                            return resolve({ ok: false, error: 'Auth Error' });
+                        }
+
+                        // Rate limit — retry once
+                        if (status === 429 && !_retried) {
+                            const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
+                            return setTimeout(() => {
+                                this.request(method, endpoint, data, true).then(resolve);
+                            }, retryAfter * 1000);
+                        }
+
+                        // Service unavailable — retry once after 2s
+                        if (status === 503 && !_retried) {
+                            return setTimeout(() => {
+                                this.request(method, endpoint, data, true).then(resolve);
+                            }, 2000);
+                        }
+
+                        // Other errors
+                        if (status >= 400) {
+                            return resolve({ ok: false, error: 'API: ' + status });
+                        }
+
+                        // Success — parse JSON (handle empty responses from DELETE etc.)
+                        const text = (resp.responseText || '').trim();
+                        if (!text) {
+                            resolve({ ok: true, data: null });
+                        } else {
+                            try {
+                                resolve({ ok: true, data: JSON.parse(text) });
+                            } catch(e) {
+                                resolve({ ok: false, error: 'Parse Error' });
+                            }
+                        }
+                    },
+                    onerror: () => {
+                        resolve({ ok: false, error: 'Network Error' });
+                    }
+                });
+            }));
+        },
+
+        get(endpoint) {
+            return this.request('GET', endpoint);
+        },
+
+        post(endpoint, data) {
+            return this.request('POST', endpoint, data);
+        },
+
+        del(endpoint) {
+            return this.request('DELETE', endpoint);
+        },
+
+        upload(endpoint, file) {
+            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+
+            return this._enqueue(() => new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const arrayBuffer = reader.result;
+                    const uint8 = new Uint8Array(arrayBuffer);
+                    const boundary = '----RDSuite' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+                    const encoder = new TextEncoder();
+
+                    // Build multipart body
+                    const header = '--' + boundary + '\r\n' +
+                        'Content-Disposition: form-data; name="file"; filename="' + file.name + '"\r\n' +
+                        'Content-Type: application/octet-stream\r\n\r\n';
+                    const footer = '\r\n--' + boundary + '--\r\n';
+
+                    const headerBytes = encoder.encode(header);
+                    const footerBytes = encoder.encode(footer);
+
+                    // Combine into single Uint8Array
+                    const body = new Uint8Array(headerBytes.length + uint8.length + footerBytes.length);
+                    body.set(headerBytes, 0);
+                    body.set(uint8, headerBytes.length);
+                    body.set(footerBytes, headerBytes.length + uint8.length);
+
+                    GM_xmlhttpRequest({
+                        method: 'PUT',
+                        url: this._BASE + endpoint,
+                        headers: {
+                            'Authorization': 'Bearer ' + State.apiKey,
+                            'Content-Type': 'multipart/form-data; boundary=' + boundary
+                        },
+                        data: body.buffer,
+                        onload: (resp) => {
+                            const status = resp.status;
+
+                            if (status === 401 || status === 403) {
+                                Config.clearKey();
+                                return resolve({ ok: false, error: 'Auth Error' });
+                            }
+
+                            if (status >= 400) {
+                                return resolve({ ok: false, error: 'API: ' + status });
+                            }
+
+                            const text = (resp.responseText || '').trim();
+                            if (!text) {
+                                resolve({ ok: true, data: null });
+                            } else {
+                                try {
+                                    resolve({ ok: true, data: JSON.parse(text) });
+                                } catch(e) {
+                                    resolve({ ok: false, error: 'Parse Error' });
+                                }
+                            }
+                        },
+                        onerror: () => {
+                            resolve({ ok: false, error: 'Network Error' });
+                        }
+                    });
+                };
+                reader.onerror = () => {
+                    resolve({ ok: false, error: 'File Read Error' });
+                };
+                reader.readAsArrayBuffer(file);
+            }));
+        }
+    };
+
+
+// --- DOM Helper Module ---
+    const DOM = {
+        create(tag, attrs = {}, children = []) {
+            const el = document.createElement(tag);
+            for (const [key, value] of Object.entries(attrs)) {
+                if (key === 'className') {
+                    el.className = value;
+                } else if (key === 'textContent') {
+                    el.textContent = value;
+                } else if (key === 'htmlContent') {
+                    el.innerHTML = value;
+                } else if (key === 'style' && typeof value === 'object') {
+                    for (const [prop, val] of Object.entries(value)) {
+                        el.style[prop] = val;
+                    }
+                } else if (key === 'style' && typeof value === 'string') {
+                    el.style.cssText = value;
+                } else if (key === 'dataset' && typeof value === 'object') {
+                    for (const [dk, dv] of Object.entries(value)) {
+                        el.dataset[dk] = dv;
+                    }
+                } else if (key.startsWith('on') && typeof value === 'function') {
+                    el.addEventListener(key.slice(2).toLowerCase(), value);
+                } else {
+                    el.setAttribute(key, value);
+                }
+            }
+            DOM._appendChildren(el, children);
+            return el;
+        },
+
+        text(str) {
+            return document.createTextNode(str);
+        },
+
+        fragment(children) {
+            const frag = document.createDocumentFragment();
+            DOM._appendChildren(frag, children);
+            return frag;
+        },
+
+        clear(el) {
+            while (el.firstChild) el.removeChild(el.firstChild);
+        },
+
+        _appendChildren(parent, children) {
+            for (const child of children) {
+                if (child == null) continue;
+                if (Array.isArray(child)) {
+                    DOM._appendChildren(parent, child);
+                } else if (typeof child === 'string') {
+                    parent.appendChild(document.createTextNode(child));
+                } else if (child instanceof Node) {
+                    parent.appendChild(child);
+                }
+            }
+        }
+    };
+
+    // =========================================================================
+    // UI Shell — Styles + FAB + Dashboard Frame + Toasts + Modals
+    // =========================================================================
+
+
+// --- Step 2: UI Module ---
     const LIGHTNING_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
 
     const UI = {
@@ -1398,7 +1434,7 @@
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v37',
+                        textContent: 'v38',
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
@@ -1604,7 +1640,8 @@
         }
     };
 
-    // ===================== Core Functions — Link Processing =====================
+
+// ===================== Core Functions — Link Processing =====================
 
     function addToHistory(item) {
         item.time = item.time || new Date().toLocaleTimeString();
@@ -1613,7 +1650,7 @@
         GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
         if (item.type === 'success') State.sessionStats.processed++;
         // Update header stats counter if visible
-        const statsEl = document.getElementById('rd-session-stats');
+        const statsEl = document.getElementById('rd-session-counter');
         if (statsEl) statsEl.textContent = State.sessionStats.processed + ' processed';
         if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.refresh();
     }
@@ -1813,26 +1850,17 @@
     function showTorrentSelectorModal(torrentId, files, title, callback) {
         const container = DOM.create('div', { style: 'display:flex;flex-direction:column;gap:10px;max-height:60vh;' });
 
-        // Header with select all / none buttons
         const headerRow = DOM.create('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px;' });
-        const selectAllBtn = DOM.create('button', {
-            textContent: 'Select All',
-            style: 'padding:4px 10px;border:1px solid ' + Config.colors.border + ';background:' + Config.colors.bgLight + ';color:' + Config.colors.text + ';border-radius:4px;cursor:pointer;font-size:12px;'
-        });
-        const selectNoneBtn = DOM.create('button', {
-            textContent: 'Select None',
-            style: 'padding:4px 10px;border:1px solid ' + Config.colors.border + ';background:' + Config.colors.bgLight + ';color:' + Config.colors.text + ';border-radius:4px;cursor:pointer;font-size:12px;'
-        });
-        headerRow.appendChild(selectAllBtn);
-        headerRow.appendChild(selectNoneBtn);
-        container.appendChild(headerRow);
+        const selectAllBtn = DOM.create('button', { textContent: 'Select All', className: 'rd-input-btn' });
+        const selectNoneBtn = DOM.create('button', { textContent: 'Select None', className: 'rd-input-btn' });
+        headerRow.append(selectAllBtn, selectNoneBtn);
+        container.append(headerRow);
 
-        // File list (scrollable)
         const fileList = DOM.create('div', { style: 'overflow-y:auto;max-height:50vh;display:flex;flex-direction:column;gap:4px;' });
-
         const checkboxes = [];
+
         files.forEach(f => {
-            const row = DOM.create('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:13px;' });
+            const row = DOM.create('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--rd-radius-xs);cursor:pointer;font-size:13px;' });
             const cb = DOM.create('input', { type: 'checkbox', checked: true, style: 'flex-shrink:0;' });
             cb.dataset.fileId = f.id;
             checkboxes.push(cb);
@@ -1842,44 +1870,27 @@
             const folderPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
 
             const label = DOM.create('span');
-            if (folderPrefix) {
-                const folderSpan = DOM.create('span', { textContent: folderPrefix, style: 'opacity:0.5;' });
-                label.appendChild(folderSpan);
-            }
-            const nameSpan = DOM.create('span', { textContent: fileName, style: 'font-weight:bold;' });
-            label.appendChild(nameSpan);
+            if (folderPrefix) label.append(DOM.create('span', { textContent: folderPrefix, style: 'opacity:0.5;' }));
+            label.append(DOM.create('span', { textContent: fileName, style: 'font-weight:bold;' }));
 
-            const sizeSpan = DOM.create('span', {
+            row.append(cb, label, DOM.create('span', {
                 textContent: formatBytes(f.bytes),
                 style: 'margin-left:auto;opacity:0.6;font-size:12px;white-space:nowrap;'
-            });
-
-            row.appendChild(cb);
-            row.appendChild(label);
-            row.appendChild(sizeSpan);
-            fileList.appendChild(row);
+            }));
+            fileList.append(row);
         });
 
-        container.appendChild(fileList);
+        container.append(fileList);
 
-        // Select All / None handlers
-        selectAllBtn.addEventListener('click', () => checkboxes.forEach(cb => cb.checked = true));
-        selectNoneBtn.addEventListener('click', () => checkboxes.forEach(cb => cb.checked = false));
+        selectAllBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = true; }));
+        selectNoneBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = false; }));
 
-        // Action buttons
-        const btnRow = DOM.create('div', { style: 'display:flex;gap:8px;justify-content:flex-end;margin-top:8px;' });
-        const cancelBtn = DOM.create('button', {
-            textContent: 'Cancel',
-            style: 'padding:6px 16px;border:1px solid ' + Config.colors.border + ';background:' + Config.colors.bgLight + ';color:' + Config.colors.text + ';border-radius:6px;cursor:pointer;'
-        });
-        const startBtn = DOM.create('button', {
-            textContent: 'Start Download',
-            style: 'padding:6px 16px;border:none;background:' + Config.colors.accent + ';color:#fff;border-radius:6px;cursor:pointer;font-weight:bold;'
-        });
+        const cancelBtn = DOM.create('button', { textContent: 'Cancel', className: 'rd-input-btn' });
+        const startBtn = DOM.create('button', { textContent: 'Start Download', className: 'rd-input-btn primary' });
+        const modal = UI.showModal(title, [container], [cancelBtn, startBtn]);
 
         cancelBtn.addEventListener('click', () => {
-            UI.closeModal();
-            // Delete the torrent since user cancelled
+            modal.close();
             API.del('/torrents/delete/' + torrentId);
         });
 
@@ -1892,16 +1903,10 @@
             await API.post('/torrents/selectFiles/' + torrentId, { files: selectedIds.join(',') });
             addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
             UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
-            UI.closeModal();
+            modal.close();
             if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
             if (callback) callback();
         });
-
-        btnRow.appendChild(cancelBtn);
-        btnRow.appendChild(startBtn);
-        container.appendChild(btnRow);
-
-        UI.showModal(title, container);
     }
 
     // --- Queue processing with parallel concurrency ---
@@ -1978,7 +1983,8 @@
         UI.copyToClipboard(result);
     }
 
-    // ===================== Tabs (Links + Page) =====================
+
+// ===================== Tabs (Links + Page) =====================
 
     const Tabs = {};
 
@@ -2043,12 +2049,13 @@
 
         _buildHistoryItem(item) {
             if (item.type === 'error') {
-                return DOM.create('div', { className: 'rd-log-item error' }, [
+                const errEl = DOM.create('div', { className: 'rd-log-item error' }, [
                     DOM.create('div', { className: 'rd-item-content' }, [
                         DOM.create('div', { className: 'rd-filename', style: 'color:var(--rd-danger);', textContent: item.msg || 'Error' }),
                         DOM.create('div', { className: 'rd-meta', textContent: item.time || '' })
                     ])
                 ]);
+                return errEl;
             }
             const isMedia = /\.(mp4|mkv|avi|mov|mp3|flac|wav|jpg|png|webp)$/i.test(item.name || '');
             const btns = [
@@ -2065,7 +2072,7 @@
                     }
                 }));
             }
-            return DOM.create('div', { className: 'rd-log-item success' }, [
+            const row = DOM.create('div', { className: 'rd-log-item success' }, [
                 DOM.create('div', { className: 'rd-item-content' }, [
                     DOM.create('div', { className: 'rd-filename', title: item.name, textContent: item.name || 'Unknown' }),
                     DOM.create('div', { className: 'rd-meta' }, [
@@ -2075,6 +2082,13 @@
                     DOM.create('div', { className: 'rd-btn-group' }, btns)
                 ])
             ]);
+            if (item.url && item.url !== '#') {
+                addMobileLongPress(row, [
+                    { label: 'Copy URL', action: () => UI.copyToClipboard(item.url) },
+                    { label: 'Download', action: () => window.open(item.url, '_blank') }
+                ]);
+            }
+            return row;
         }
     };
 
@@ -2250,8 +2264,7 @@
             selectAllLabel.append(selectAllChk, DOM.text('All'));
 
             const delSelBtn = DOM.create('button', {
-                className: 'rd-input-btn', textContent: 'Delete',
-                style: 'margin:0; background:var(--rd-danger); color:var(--rd-bg-base); border:none;',
+                className: 'rd-input-btn danger', textContent: 'Delete', style: 'margin:0;',
                 onClick: () => {
                     const sel = Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value);
                     if (!sel.length) return;
@@ -2277,6 +2290,7 @@
 
             const listContainer = DOM.create('div', { id: 'rd-torrent-list-container', className: 'rd-log-list' });
             area.append(controlBar, listContainer);
+            addPullToRefresh(listContainer, () => this._fetchTorrents(true));
             this._renderList('');
             this.startPolling();
         },
@@ -2433,7 +2447,7 @@
             const area = document.getElementById('rd-content-area');
             if (!area) return;
             DOM.clear(area);
-            area.append(DOM.create('div', { style: 'text-align:center; padding:16px; color:var(--rd-text-secondary);', textContent: 'Syncing Cloud...' }));
+            area.append(DOM.create('div', { style: 'text-align:center; padding:16px; color:var(--rd-text-secondary);', textContent: 'Loading…' }));
             this._fetchCloud();
         },
 
@@ -2481,8 +2495,7 @@
             selectAllLabel.append(selectAllChk, DOM.text('All'));
 
             const delSelBtn = DOM.create('button', {
-                className: 'rd-input-btn', textContent: 'Delete',
-                style: 'margin:0; background:var(--rd-danger); color:var(--rd-bg-base); border:none;',
+                className: 'rd-input-btn danger', textContent: 'Delete', style: 'margin:0;',
                 onClick: () => {
                     const sel = Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.value);
                     if (!sel.length) return;
@@ -2512,6 +2525,7 @@
 
             const listContainer = DOM.create('div', { id: 'rd-cloud-list-container', className: 'rd-log-list' });
             area.append(controlBar, listContainer);
+            addPullToRefresh(listContainer, () => this._fetchCloud());
             this._renderList('');
         },
 
@@ -2599,7 +2613,7 @@
             DOM.clear(area);
 
             // Show loading while fetching
-            area.append(DOM.create('div', { style: 'text-align:center; padding:16px; color:var(--rd-text-secondary);', textContent: 'Loading Account Info...' }));
+            area.append(DOM.create('div', { style: 'text-align:center; padding:16px; color:var(--rd-text-secondary);', textContent: 'Loading…' }));
 
             // Fetch user + traffic data if not cached
             if (State.userProfile && State.trafficData) {
@@ -2696,7 +2710,8 @@
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
-                { key: 'notificationSound', label: 'Notification Sound' }
+                { key: 'notificationSound', label: 'Notification Sound' },
+                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -2818,6 +2833,7 @@
         }
     };
 
+
 const Scanner = {
     _xrayTimer: null,
     _scanTimer: null,
@@ -2875,7 +2891,7 @@ const Scanner = {
     scanPage() {
         this._scanDocument(document);
         // Deep scan iframes if enabled
-        if (State.deepScanEnabled) {
+        if (State.settings.deepScan) {
             document.querySelectorAll('iframe').forEach(iframe => {
                 try {
                     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
@@ -3094,6 +3110,7 @@ const Scanner = {
         });
     }
 };
+
 
 const Media = {
     _objectUrls: [],
@@ -3372,7 +3389,8 @@ const Media = {
     }
 };
 
-    // ===================== Task 11: Mobile Experience =====================
+
+// ===================== Task 11: Mobile Experience =====================
 
     function addMobileSheetBehavior(container) {
         if (!State.isMobile) return;
@@ -3466,7 +3484,8 @@ const Media = {
         scrollContainer.addEventListener('touchend', () => { pulling = false; });
     }
 
-    // ===================== Task 12: Offline Resilience =====================
+
+// ===================== Task 12: Offline Resilience =====================
 
     function loadOfflineData(key, stateProp) {
         try {
