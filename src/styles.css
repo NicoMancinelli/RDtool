@@ -397,6 +397,23 @@
         .rd-badge.visible {
             opacity: 1;
         }
+        .rd-queue-badge {
+            background: var(--rd-warning);
+            top: auto;
+            bottom: -4px;
+            left: -4px;
+            right: auto;
+            width: auto;
+            min-width: 18px;
+            padding: 0 4px;
+            border-radius: 9px;
+        }
+        .rd-queue-status {
+            font-size: 10px;
+            color: var(--rd-warning);
+            font-weight: 600;
+            white-space: nowrap;
+        }
         .rd-dl-badge {
             display: inline;
             background: rgba(129, 201, 149, 0.1);

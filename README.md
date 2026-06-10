@@ -43,6 +43,10 @@ A Tampermonkey userscript that turns any webpage into a Real-Debrid workstation 
 
 See [docs/TESTING.md](docs/TESTING.md) for a full manual test checklist and [docs/DESIGN.md](docs/DESIGN.md) for the design system.
 
+## GreasyFork
+
+Listing copy, install steps, privacy notes, and browser compatibility for publishing on GreasyFork: [docs/GREASYFORK.md](docs/GREASYFORK.md).
+
 ## Supported Hosts
 
 Built-in patterns for 1fichier, Rapidgator, Mega, MediaFire, Google Drive, YouTube, Turbobit, Uploaded, Zippyshare, Keep2Share, Nitroflare, Pixeldrain, DDownload, Katfile, Gofile, Qiwi.gg — plus dynamic hosts from the Real-Debrid API and custom hosts in Settings.

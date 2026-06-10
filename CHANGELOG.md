@@ -4,6 +4,29 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.2] - 2026-06-10
+
+### Added
+
+- Batch queue progress in dashboard header and FAB badge (`Processing N/M...`)
+- Cancel in-flight queue from dashboard header
+- Page tab Queue button shows queued item count after click
+
+### Changed
+
+- Suppress per-magnet toasts while a batch queue is running
+
+## [38.1] - 2026-06-10
+
+### Added
+
+- Host regex auto-update indicator in Settings account area (`Hosts: N supported` with last-updated time; subtle warning when API refresh fails)
+- Export JSON button on Links tab — downloads `State.linkHistory` as formatted `rd-link-history.json`
+- Customizable dashboard toggle keyboard shortcut in Settings (default `alt+r`; supports `alt`/`ctrl`/`shift`/`meta` + key)
+- GreasyFork listing prep: `@license`, `@homepageURL`, `@supportURL` in userscript metadata
+- `docs/GREASYFORK.md` with description, features, install steps, privacy note, and browser compatibility
+- README GreasyFork section linking to listing docs
+
 ## [38.0] - 2026-06-10
 
 ### Added

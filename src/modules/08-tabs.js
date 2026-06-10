@@ -28,8 +28,12 @@
             btnRow.append(unrestrictBtn, clearBtn);
 
             // Export controls
-            const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; margin-top:8px;' });
+            const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
+            exportRow.append(DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
+                onClick: () => exportHistoryJson()
+            }));
 
             inputArea.append(textarea, btnRow, exportRow);
 
@@ -157,18 +161,27 @@
                     processQueue(sel, 'dl');
                 }
             });
+            const queueStatus = DOM.create('span', {
+                id: 'rd-page-queue-status',
+                className: 'rd-queue-status',
+                style: 'font-size:11px;color:var(--rd-accent);font-weight:600;display:none;'
+            });
             const queueBtn = DOM.create('button', {
                 className: 'rd-input-btn', textContent: 'Queue', style: 'margin:0; background:var(--rd-accent); color:var(--rd-bg-base); border:none;',
                 onClick: () => {
                     const sel = Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value);
                     if (!sel.length) return UI.showToast('None selected!', 'error');
+                    queueStatus.textContent = sel.length + ' queued';
+                    queueStatus.style.display = '';
+                    queueBtn.textContent = 'Queued ' + sel.length;
+                    UI.showToast('Queued ' + sel.length + ' items');
                     State.currentTab = 'links';
                     UI.renderDashboard();
                     processQueue(sel, 'queue');
                 }
             });
 
-            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn);
+            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn, queueStatus);
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -680,6 +693,7 @@
 
             // Points
             card.append(DOM.create('div', { style: 'font-size:12px; color:var(--rd-text-secondary); margin-top:8px;', textContent: 'Fidelity Points: ' + user.points }));
+            card.append(this._buildHostsIndicator());
             if (user.points >= 1000) {
                 card.append(DOM.create('button', {
                     className: 'rd-action-btn', textContent: 'Convert 1000 Points to 30 Days',
@@ -746,6 +760,7 @@
             ]));
 
             // Text inputs
+            wrapper.append(this._buildTextRow('Dashboard Toggle Shortcut', 'toggleShortcut', State.settings.toggleShortcut));
             wrapper.append(this._buildTextRow('Smart Filter Extensions', 'filterExts', State.settings.filterExts));
             wrapper.append(this._buildTextRow('Custom Hosts (comma separated)', 'customHosts', State.settings.customHosts, () => { Config.hostRegex = Config.getActiveRegex(); }));
 
@@ -766,6 +781,30 @@
             }));
 
             area.append(wrapper);
+        },
+
+        _getHostsIndicatorText() {
+            const n = State.dynamicHosts?.length || 0;
+            let text = 'Hosts: ' + n + ' supported';
+            if (State.hostsUpdatedAt) text += ' · updated ' + formatRelativeTime(State.hostsUpdatedAt);
+            if (State.hostsFetchFailed) text += ' · refresh failed';
+            return text;
+        },
+
+        _buildHostsIndicator() {
+            return DOM.create('div', {
+                id: 'rd-hosts-indicator',
+                className: 'rd-account-row',
+                style: 'padding:6px 0 0; border:none; font-size:11px; color:' + (State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)') + ';',
+                textContent: this._getHostsIndicatorText()
+            });
+        },
+
+        _updateHostsIndicator() {
+            const el = document.getElementById('rd-hosts-indicator');
+            if (!el) return;
+            el.textContent = this._getHostsIndicatorText();
+            el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
         },
 
         _buildToggleRow({ key, label, desc }) {

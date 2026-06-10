@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.0
+// @version      38.2
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
 // @author       Neek
+// @license      MIT
+// @homepageURL  https://github.com/NicoMancinelli/RDtool
+// @supportURL   https://github.com/NicoMancinelli/RDtool/issues
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
@@ -420,6 +423,23 @@ GM_addStyle(`:root {
         .rd-badge.visible {
             opacity: 1;
         }
+        .rd-queue-badge {
+            background: var(--rd-warning);
+            top: auto;
+            bottom: -4px;
+            left: -4px;
+            right: auto;
+            width: auto;
+            min-width: 18px;
+            padding: 0 4px;
+            border-radius: 9px;
+        }
+        .rd-queue-status {
+            font-size: 10px;
+            color: var(--rd-warning);
+            font-weight: 600;
+            white-space: nowrap;
+        }
         .rd-dl-badge {
             display: inline;
             background: rgba(129, 201, 149, 0.1);
@@ -816,7 +836,8 @@ GM_addStyle(`:root {
             customHosts: '',
             exportFormat: 'raw',
             notificationSound: false,
-            deepScan: false
+            deepScan: false,
+            toggleShortcut: 'alt+r'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -861,7 +882,31 @@ GM_addStyle(`:root {
             return new RegExp('\\b(' + allHosts.join('|') + ')', 'i');
         },
 
-        hostRegex: null
+        hostRegex: null,
+
+        parseShortcut(str) {
+            const parts = (str || '').toLowerCase().split('+').map(s => s.trim()).filter(Boolean);
+            const modifiers = { alt: false, ctrl: false, shift: false, meta: false };
+            let key = '';
+            for (const part of parts) {
+                if (part === 'alt') modifiers.alt = true;
+                else if (part === 'ctrl' || part === 'control') modifiers.ctrl = true;
+                else if (part === 'shift') modifiers.shift = true;
+                else if (part === 'meta' || part === 'cmd' || part === 'command') modifiers.meta = true;
+                else key = part;
+            }
+            return { modifiers, key };
+        },
+
+        matchesShortcut(e, shortcutStr) {
+            const { modifiers, key } = this.parseShortcut(shortcutStr);
+            if (!key) return false;
+            if (e.altKey !== modifiers.alt) return false;
+            if (e.ctrlKey !== modifiers.ctrl) return false;
+            if (e.shiftKey !== modifiers.shift) return false;
+            if (e.metaKey !== modifiers.meta) return false;
+            return e.key.toLowerCase() === key;
+        }
     };
 
     // =========================================================================
@@ -882,6 +927,8 @@ GM_addStyle(`:root {
         cachedCloud: [],
         scannedLinksMap: new Map(),
         dynamicHosts: [],
+        hostsUpdatedAt: null,
+        hostsFetchFailed: false,
         liveHosts: {},
         userProfile: null,
         trafficData: null,
@@ -892,6 +939,11 @@ GM_addStyle(`:root {
         torrentRefreshInterval: null,
         magnetCacheQueue: [],
         cacheCheckTimer: null,
+        // Queue
+        queueProcessing: false,
+        queueCancel: false,
+        queueCompleted: 0,
+        queueTotal: 0,
         // Session
         sessionStats: { processed: 0 },
         lastUrl: location.href
@@ -919,6 +971,8 @@ GM_addStyle(`:root {
 
     // Load dynamic hosts
     try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
+    const savedHostsAt = parseInt(GM_getValue('rd_hosts_updated_at', '0'), 10);
+    if (savedHostsAt > 0) State.hostsUpdatedAt = savedHostsAt;
 
     // Now build the host regex
     Config.hostRegex = Config.getActiveRegex();
@@ -930,6 +984,19 @@ GM_addStyle(`:root {
     // =========================================================================
 
     function saveSettings() { GM_setValue('rd_settings', JSON.stringify(State.settings)); }
+
+    function formatRelativeTime(ts) {
+        if (!ts) return '';
+        const sec = Math.floor((Date.now() - ts) / 1000);
+        if (sec < 60) return 'just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60) return min + 'm ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return hr + 'h ago';
+        const day = Math.floor(hr / 24);
+        if (day < 7) return day + 'd ago';
+        return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
 
     function formatBytes(bytes) {
         if (!bytes || bytes === 0) return '0 B';
@@ -1257,7 +1324,7 @@ GM_addStyle(`:root {
                     if (media) { media.remove(); return; }
                     if (State.isExpanded) { UI.toggleDashboard(false); return; }
                 }
-                if (e.altKey && e.key.toLowerCase() === 'r') {
+                if (Config.matchesShortcut(e, State.settings.toggleShortcut)) {
                     e.preventDefault();
                     UI.toggleDashboard(!State.isExpanded);
                 }
@@ -1325,9 +1392,15 @@ GM_addStyle(`:root {
 
             const fabClass = State.isMobile ? 'rd-mobile-fab' : 'rd-desktop-fab';
             const badge = DOM.create('span', { className: 'rd-badge', id: 'rd-fab-badge', textContent: '0' });
+            const queueBadge = DOM.create('span', {
+                className: 'rd-badge rd-queue-badge',
+                id: 'rd-fab-queue-badge',
+                textContent: ''
+            });
             const fab = DOM.create('div', { className: fabClass, style: 'position:relative;' }, [
                 DOM.create('span', { htmlContent: LIGHTNING_SVG }),
-                badge
+                badge,
+                queueBadge
             ]);
 
             container.appendChild(fab);
@@ -1341,6 +1414,7 @@ GM_addStyle(`:root {
             }
 
             UI.updateBadge(count);
+            if (State.queueProcessing) UI.updateQueueProgress(State.queueCompleted, State.queueTotal);
         },
 
         renderSetup() {
@@ -1434,13 +1508,29 @@ GM_addStyle(`:root {
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v38',
+                        textContent: 'v38.2',
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
                         textContent: State.sessionStats.processed + ' processed',
                         style: 'font-size:10px;color:var(--rd-text-secondary);margin-left:4px;',
                         id: 'rd-session-counter'
+                    }),
+                    DOM.create('span', {
+                        id: 'rd-queue-progress',
+                        className: 'rd-queue-status',
+                        style: State.queueProcessing ? '' : 'display:none;',
+                        textContent: State.queueProcessing ? 'Processing ' + State.queueCompleted + '/' + State.queueTotal + '...' : ''
+                    }),
+                    DOM.create('button', {
+                        id: 'rd-queue-cancel',
+                        className: 'rd-input-btn',
+                        textContent: 'Cancel',
+                        style: State.queueProcessing ? 'margin:0;padding:2px 8px;font-size:10px;' : 'display:none;',
+                        onClick: () => {
+                            State.queueCancel = true;
+                            UI.showToast('Cancelling queue...');
+                        }
                     })
                 ]),
                 DOM.create('span', {
@@ -1612,6 +1702,32 @@ GM_addStyle(`:root {
             }
         },
 
+        setQueueActive(active) {
+            const progEl = document.getElementById('rd-queue-progress');
+            const cancelBtn = document.getElementById('rd-queue-cancel');
+            const queueBadge = document.getElementById('rd-fab-queue-badge');
+            if (progEl) progEl.style.display = active ? '' : 'none';
+            if (cancelBtn) cancelBtn.style.display = active ? '' : 'none';
+            if (queueBadge) queueBadge.classList.toggle('visible', active);
+            if (!active && queueBadge) queueBadge.textContent = '';
+        },
+
+        updateQueueProgress(completed, total) {
+            const label = 'Processing ' + completed + '/' + total + '...';
+            const progEl = document.getElementById('rd-queue-progress');
+            if (progEl) {
+                progEl.textContent = label;
+                progEl.style.display = '';
+            }
+            const cancelBtn = document.getElementById('rd-queue-cancel');
+            if (cancelBtn) cancelBtn.style.display = '';
+            const queueBadge = document.getElementById('rd-fab-queue-badge');
+            if (queueBadge) {
+                queueBadge.textContent = completed + '/' + total;
+                queueBadge.classList.add('visible');
+            }
+        },
+
         copyToClipboard(text, btnElement) {
             const doCopy = () => {
                 if (btnElement) {
@@ -1772,7 +1888,7 @@ GM_addStyle(`:root {
     // --- Magnet handling ---
 
     async function addMagnet(magnet, callback = null) {
-        UI.showToast('Sending Magnet...');
+        if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Magnet Error: ' + error });
@@ -1784,7 +1900,7 @@ GM_addStyle(`:root {
         if (State.settings.magnetAction === 'all') {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-            UI.showToast('Magnet Added Successfully!');
+            if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
             if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
             if (callback) callback();
             return;
@@ -1796,7 +1912,7 @@ GM_addStyle(`:root {
             // Fallback: select all
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-            UI.showToast('Magnet Added!');
+            if (!State.queueProcessing) UI.showToast('Magnet Added!');
             if (callback) callback();
             return;
         }
@@ -1818,7 +1934,7 @@ GM_addStyle(`:root {
             if (largestId) {
                 await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
                 addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
-                UI.showToast('Main Video Added!');
+                if (!State.queueProcessing) UI.showToast('Main Video Added!');
                 if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
                 if (callback) callback();
             } else {
@@ -1840,7 +1956,7 @@ GM_addStyle(`:root {
         }
         await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
         addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-        UI.showToast('Magnet Added Successfully!');
+        if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
         if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
         if (callback) callback();
     }
@@ -1912,16 +2028,29 @@ GM_addStyle(`:root {
     // --- Queue processing with parallel concurrency ---
 
     async function processQueue(urls, mode) {
+        if (State.queueProcessing) {
+            UI.showToast('Queue already running', 'error');
+            return;
+        }
+
         const concurrency = 3;
         let completed = 0;
         const total = urls.length;
-        const remaining = [...urls]; // copy to avoid mutating
+        const remaining = [...urls];
 
-        UI.showToast('Processing ' + total + ' links...');
+        State.queueProcessing = true;
+        State.queueCancel = false;
+        State.queueCompleted = 0;
+        State.queueTotal = total;
+        UI.setQueueActive(true);
+        UI.updateQueueProgress(0, total);
+        UI.showToast('Processing 0/' + total + '...');
 
         const worker = async () => {
             while (remaining.length > 0) {
+                if (State.queueCancel) break;
                 const url = remaining.shift();
+                if (!url) break;
                 if (url.startsWith('magnet:')) {
                     await addMagnet(url);
                 } else {
@@ -1929,15 +2058,26 @@ GM_addStyle(`:root {
                         if (mode === 'dl' && finalUrl) window.open(finalUrl, '_blank');
                     });
                 }
+                if (State.queueCancel) break;
                 completed++;
-                const progEl = document.getElementById('rd-queue-progress');
-                if (progEl) progEl.textContent = completed + '/' + total;
+                State.queueCompleted = completed;
+                UI.updateQueueProgress(completed, total);
             }
         };
 
         const workers = Array.from({ length: Math.min(concurrency, total) }, () => worker());
         await Promise.all(workers);
-        UI.showToast('Queue finished');
+
+        const cancelled = State.queueCancel;
+        State.queueProcessing = false;
+        State.queueCancel = false;
+        UI.setQueueActive(false);
+
+        if (cancelled) {
+            UI.showToast('Queue cancelled at ' + completed + '/' + total);
+        } else {
+            UI.showToast('Queue finished (' + total + ')');
+        }
     }
 
     // --- M3U generation ---
@@ -1983,6 +2123,16 @@ GM_addStyle(`:root {
         UI.copyToClipboard(result);
     }
 
+    function exportHistoryJson() {
+        if (!State.linkHistory.length) { UI.showToast('No history to export', 'error'); return; }
+        const blob = new Blob([JSON.stringify(State.linkHistory, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = DOM.create('a', { href: url, download: 'rd-link-history.json' });
+        a.click();
+        URL.revokeObjectURL(url);
+        UI.showToast('History Exported');
+    }
+
 
 // ===================== Tabs (Links + Page) =====================
 
@@ -2014,8 +2164,12 @@ GM_addStyle(`:root {
             btnRow.append(unrestrictBtn, clearBtn);
 
             // Export controls
-            const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; margin-top:8px;' });
+            const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
+            exportRow.append(DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
+                onClick: () => exportHistoryJson()
+            }));
 
             inputArea.append(textarea, btnRow, exportRow);
 
@@ -2143,18 +2297,27 @@ GM_addStyle(`:root {
                     processQueue(sel, 'dl');
                 }
             });
+            const queueStatus = DOM.create('span', {
+                id: 'rd-page-queue-status',
+                className: 'rd-queue-status',
+                style: 'font-size:11px;color:var(--rd-accent);font-weight:600;display:none;'
+            });
             const queueBtn = DOM.create('button', {
                 className: 'rd-input-btn', textContent: 'Queue', style: 'margin:0; background:var(--rd-accent); color:var(--rd-bg-base); border:none;',
                 onClick: () => {
                     const sel = Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value);
                     if (!sel.length) return UI.showToast('None selected!', 'error');
+                    queueStatus.textContent = sel.length + ' queued';
+                    queueStatus.style.display = '';
+                    queueBtn.textContent = 'Queued ' + sel.length;
+                    UI.showToast('Queued ' + sel.length + ' items');
                     State.currentTab = 'links';
                     UI.renderDashboard();
                     processQueue(sel, 'queue');
                 }
             });
 
-            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn);
+            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn, queueStatus);
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -2666,6 +2829,7 @@ GM_addStyle(`:root {
 
             // Points
             card.append(DOM.create('div', { style: 'font-size:12px; color:var(--rd-text-secondary); margin-top:8px;', textContent: 'Fidelity Points: ' + user.points }));
+            card.append(this._buildHostsIndicator());
             if (user.points >= 1000) {
                 card.append(DOM.create('button', {
                     className: 'rd-action-btn', textContent: 'Convert 1000 Points to 30 Days',
@@ -2732,6 +2896,7 @@ GM_addStyle(`:root {
             ]));
 
             // Text inputs
+            wrapper.append(this._buildTextRow('Dashboard Toggle Shortcut', 'toggleShortcut', State.settings.toggleShortcut));
             wrapper.append(this._buildTextRow('Smart Filter Extensions', 'filterExts', State.settings.filterExts));
             wrapper.append(this._buildTextRow('Custom Hosts (comma separated)', 'customHosts', State.settings.customHosts, () => { Config.hostRegex = Config.getActiveRegex(); }));
 
@@ -2752,6 +2917,30 @@ GM_addStyle(`:root {
             }));
 
             area.append(wrapper);
+        },
+
+        _getHostsIndicatorText() {
+            const n = State.dynamicHosts?.length || 0;
+            let text = 'Hosts: ' + n + ' supported';
+            if (State.hostsUpdatedAt) text += ' · updated ' + formatRelativeTime(State.hostsUpdatedAt);
+            if (State.hostsFetchFailed) text += ' · refresh failed';
+            return text;
+        },
+
+        _buildHostsIndicator() {
+            return DOM.create('div', {
+                id: 'rd-hosts-indicator',
+                className: 'rd-account-row',
+                style: 'padding:6px 0 0; border:none; font-size:11px; color:' + (State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)') + ';',
+                textContent: this._getHostsIndicatorText()
+            });
+        },
+
+        _updateHostsIndicator() {
+            const el = document.getElementById('rd-hosts-indicator');
+            if (!el) return;
+            el.textContent = this._getHostsIndicatorText();
+            el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
         },
 
         _buildToggleRow({ key, label, desc }) {
@@ -2846,9 +3035,15 @@ const Scanner = {
         API.get('/hosts/domains').then(({ ok, data }) => {
             if (ok && Array.isArray(data)) {
                 State.dynamicHosts = data;
+                State.hostsUpdatedAt = Date.now();
+                State.hostsFetchFailed = false;
                 GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
+                GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
                 Config.hostRegex = Config.getActiveRegex();
+            } else {
+                State.hostsFetchFailed = true;
             }
+            if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
         });
         API.get('/hosts/status').then(({ ok, data }) => {
             if (ok && data) State.liveHosts = data;

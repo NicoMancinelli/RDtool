@@ -129,7 +129,7 @@
     // --- Magnet handling ---
 
     async function addMagnet(magnet, callback = null) {
-        UI.showToast('Sending Magnet...');
+        if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Magnet Error: ' + error });
@@ -141,7 +141,7 @@
         if (State.settings.magnetAction === 'all') {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-            UI.showToast('Magnet Added Successfully!');
+            if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
             if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
             if (callback) callback();
             return;
@@ -153,7 +153,7 @@
             // Fallback: select all
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-            UI.showToast('Magnet Added!');
+            if (!State.queueProcessing) UI.showToast('Magnet Added!');
             if (callback) callback();
             return;
         }
@@ -175,7 +175,7 @@
             if (largestId) {
                 await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
                 addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
-                UI.showToast('Main Video Added!');
+                if (!State.queueProcessing) UI.showToast('Main Video Added!');
                 if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
                 if (callback) callback();
             } else {
@@ -197,7 +197,7 @@
         }
         await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
         addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-        UI.showToast('Magnet Added Successfully!');
+        if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
         if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
         if (callback) callback();
     }
@@ -269,16 +269,29 @@
     // --- Queue processing with parallel concurrency ---
 
     async function processQueue(urls, mode) {
+        if (State.queueProcessing) {
+            UI.showToast('Queue already running', 'error');
+            return;
+        }
+
         const concurrency = 3;
         let completed = 0;
         const total = urls.length;
-        const remaining = [...urls]; // copy to avoid mutating
+        const remaining = [...urls];
 
-        UI.showToast('Processing ' + total + ' links...');
+        State.queueProcessing = true;
+        State.queueCancel = false;
+        State.queueCompleted = 0;
+        State.queueTotal = total;
+        UI.setQueueActive(true);
+        UI.updateQueueProgress(0, total);
+        UI.showToast('Processing 0/' + total + '...');
 
         const worker = async () => {
             while (remaining.length > 0) {
+                if (State.queueCancel) break;
                 const url = remaining.shift();
+                if (!url) break;
                 if (url.startsWith('magnet:')) {
                     await addMagnet(url);
                 } else {
@@ -286,15 +299,26 @@
                         if (mode === 'dl' && finalUrl) window.open(finalUrl, '_blank');
                     });
                 }
+                if (State.queueCancel) break;
                 completed++;
-                const progEl = document.getElementById('rd-queue-progress');
-                if (progEl) progEl.textContent = completed + '/' + total;
+                State.queueCompleted = completed;
+                UI.updateQueueProgress(completed, total);
             }
         };
 
         const workers = Array.from({ length: Math.min(concurrency, total) }, () => worker());
         await Promise.all(workers);
-        UI.showToast('Queue finished');
+
+        const cancelled = State.queueCancel;
+        State.queueProcessing = false;
+        State.queueCancel = false;
+        UI.setQueueActive(false);
+
+        if (cancelled) {
+            UI.showToast('Queue cancelled at ' + completed + '/' + total);
+        } else {
+            UI.showToast('Queue finished (' + total + ')');
+        }
     }
 
     // --- M3U generation ---
@@ -338,4 +362,14 @@
         else if (State.settings.exportFormat === 'wget') result = urls.map(u => 'wget "' + u + '"').join('\n');
         else result = urls.join('\n');
         UI.copyToClipboard(result);
+    }
+
+    function exportHistoryJson() {
+        if (!State.linkHistory.length) { UI.showToast('No history to export', 'error'); return; }
+        const blob = new Blob([JSON.stringify(State.linkHistory, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = DOM.create('a', { href: url, download: 'rd-link-history.json' });
+        a.click();
+        URL.revokeObjectURL(url);
+        UI.showToast('History Exported');
     }

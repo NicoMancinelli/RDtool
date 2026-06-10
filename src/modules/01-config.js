@@ -23,7 +23,8 @@
             customHosts: '',
             exportFormat: 'raw',
             notificationSound: false,
-            deepScan: false
+            deepScan: false,
+            toggleShortcut: 'alt+r'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -68,7 +69,31 @@
             return new RegExp('\\b(' + allHosts.join('|') + ')', 'i');
         },
 
-        hostRegex: null
+        hostRegex: null,
+
+        parseShortcut(str) {
+            const parts = (str || '').toLowerCase().split('+').map(s => s.trim()).filter(Boolean);
+            const modifiers = { alt: false, ctrl: false, shift: false, meta: false };
+            let key = '';
+            for (const part of parts) {
+                if (part === 'alt') modifiers.alt = true;
+                else if (part === 'ctrl' || part === 'control') modifiers.ctrl = true;
+                else if (part === 'shift') modifiers.shift = true;
+                else if (part === 'meta' || part === 'cmd' || part === 'command') modifiers.meta = true;
+                else key = part;
+            }
+            return { modifiers, key };
+        },
+
+        matchesShortcut(e, shortcutStr) {
+            const { modifiers, key } = this.parseShortcut(shortcutStr);
+            if (!key) return false;
+            if (e.altKey !== modifiers.alt) return false;
+            if (e.ctrlKey !== modifiers.ctrl) return false;
+            if (e.shiftKey !== modifiers.shift) return false;
+            if (e.metaKey !== modifiers.meta) return false;
+            return e.key.toLowerCase() === key;
+        }
     };
 
     // =========================================================================

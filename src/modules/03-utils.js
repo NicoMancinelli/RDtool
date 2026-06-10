@@ -3,6 +3,19 @@
 
     function saveSettings() { GM_setValue('rd_settings', JSON.stringify(State.settings)); }
 
+    function formatRelativeTime(ts) {
+        if (!ts) return '';
+        const sec = Math.floor((Date.now() - ts) / 1000);
+        if (sec < 60) return 'just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60) return min + 'm ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return hr + 'h ago';
+        const day = Math.floor(hr / 24);
+        if (day < 7) return day + 'd ago';
+        return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
     function formatBytes(bytes) {
         if (!bytes || bytes === 0) return '0 B';
         const k = 1024;

@@ -10,9 +10,15 @@ const Scanner = {
         API.get('/hosts/domains').then(({ ok, data }) => {
             if (ok && Array.isArray(data)) {
                 State.dynamicHosts = data;
+                State.hostsUpdatedAt = Date.now();
+                State.hostsFetchFailed = false;
                 GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
+                GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
                 Config.hostRegex = Config.getActiveRegex();
+            } else {
+                State.hostsFetchFailed = true;
             }
+            if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
         });
         API.get('/hosts/status').then(({ ok, data }) => {
             if (ok && data) State.liveHosts = data;

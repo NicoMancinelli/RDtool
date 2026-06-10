@@ -23,6 +23,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] DL / URL / Play buttons work on success items
 - [ ] Clear empties history
 - [ ] Export produces plain text / curl / wget format
+- [ ] Export JSON downloads `rd-link-history.json` with full history array; empty history shows error toast
 - [ ] Drag-and-drop link onto dashboard processes it
 - [ ] Session counter in header increments on success
 
@@ -87,7 +88,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 
 ## Keyboard
 
-- [ ] `Alt+R` toggles dashboard
+- [ ] Dashboard toggle shortcut works (default `alt+r`; customizable in Settings → Preferences)
 - [ ] `Escape` closes modal, then player, then dashboard
 
 ## Regression Checks (v37.1 / v38.0)

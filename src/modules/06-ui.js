@@ -50,7 +50,7 @@
                     if (media) { media.remove(); return; }
                     if (State.isExpanded) { UI.toggleDashboard(false); return; }
                 }
-                if (e.altKey && e.key.toLowerCase() === 'r') {
+                if (Config.matchesShortcut(e, State.settings.toggleShortcut)) {
                     e.preventDefault();
                     UI.toggleDashboard(!State.isExpanded);
                 }
@@ -118,9 +118,15 @@
 
             const fabClass = State.isMobile ? 'rd-mobile-fab' : 'rd-desktop-fab';
             const badge = DOM.create('span', { className: 'rd-badge', id: 'rd-fab-badge', textContent: '0' });
+            const queueBadge = DOM.create('span', {
+                className: 'rd-badge rd-queue-badge',
+                id: 'rd-fab-queue-badge',
+                textContent: ''
+            });
             const fab = DOM.create('div', { className: fabClass, style: 'position:relative;' }, [
                 DOM.create('span', { htmlContent: LIGHTNING_SVG }),
-                badge
+                badge,
+                queueBadge
             ]);
 
             container.appendChild(fab);
@@ -134,6 +140,7 @@
             }
 
             UI.updateBadge(count);
+            if (State.queueProcessing) UI.updateQueueProgress(State.queueCompleted, State.queueTotal);
         },
 
         renderSetup() {
@@ -227,13 +234,29 @@
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v38',
+                        textContent: 'v38.2',
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
                         textContent: State.sessionStats.processed + ' processed',
                         style: 'font-size:10px;color:var(--rd-text-secondary);margin-left:4px;',
                         id: 'rd-session-counter'
+                    }),
+                    DOM.create('span', {
+                        id: 'rd-queue-progress',
+                        className: 'rd-queue-status',
+                        style: State.queueProcessing ? '' : 'display:none;',
+                        textContent: State.queueProcessing ? 'Processing ' + State.queueCompleted + '/' + State.queueTotal + '...' : ''
+                    }),
+                    DOM.create('button', {
+                        id: 'rd-queue-cancel',
+                        className: 'rd-input-btn',
+                        textContent: 'Cancel',
+                        style: State.queueProcessing ? 'margin:0;padding:2px 8px;font-size:10px;' : 'display:none;',
+                        onClick: () => {
+                            State.queueCancel = true;
+                            UI.showToast('Cancelling queue...');
+                        }
                     })
                 ]),
                 DOM.create('span', {
@@ -402,6 +425,32 @@
             const container = document.getElementById('rd-ui-container');
             if (!State.isExpanded && container && State.settings.autoShow && count > 0) {
                 container.classList.remove('rd-hidden');
+            }
+        },
+
+        setQueueActive(active) {
+            const progEl = document.getElementById('rd-queue-progress');
+            const cancelBtn = document.getElementById('rd-queue-cancel');
+            const queueBadge = document.getElementById('rd-fab-queue-badge');
+            if (progEl) progEl.style.display = active ? '' : 'none';
+            if (cancelBtn) cancelBtn.style.display = active ? '' : 'none';
+            if (queueBadge) queueBadge.classList.toggle('visible', active);
+            if (!active && queueBadge) queueBadge.textContent = '';
+        },
+
+        updateQueueProgress(completed, total) {
+            const label = 'Processing ' + completed + '/' + total + '...';
+            const progEl = document.getElementById('rd-queue-progress');
+            if (progEl) {
+                progEl.textContent = label;
+                progEl.style.display = '';
+            }
+            const cancelBtn = document.getElementById('rd-queue-cancel');
+            if (cancelBtn) cancelBtn.style.display = '';
+            const queueBadge = document.getElementById('rd-fab-queue-badge');
+            if (queueBadge) {
+                queueBadge.textContent = completed + '/' + total;
+                queueBadge.classList.add('visible');
             }
         },
 

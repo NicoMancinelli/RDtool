@@ -13,6 +13,8 @@
         cachedCloud: [],
         scannedLinksMap: new Map(),
         dynamicHosts: [],
+        hostsUpdatedAt: null,
+        hostsFetchFailed: false,
         liveHosts: {},
         userProfile: null,
         trafficData: null,
@@ -23,6 +25,11 @@
         torrentRefreshInterval: null,
         magnetCacheQueue: [],
         cacheCheckTimer: null,
+        // Queue
+        queueProcessing: false,
+        queueCancel: false,
+        queueCompleted: 0,
+        queueTotal: 0,
         // Session
         sessionStats: { processed: 0 },
         lastUrl: location.href
@@ -50,6 +57,8 @@
 
     // Load dynamic hosts
     try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
+    const savedHostsAt = parseInt(GM_getValue('rd_hosts_updated_at', '0'), 10);
+    if (savedHostsAt > 0) State.hostsUpdatedAt = savedHostsAt;
 
     // Now build the host regex
     Config.hostRegex = Config.getActiveRegex();

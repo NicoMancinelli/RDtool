@@ -115,7 +115,7 @@ Emoji are intentional for v38 — zero dependencies and instant recognition. SVG
 - **Empty states:** Centered `--rd-text-secondary` copy (e.g. "No history. Paste links below or drag & drop.")
 - **Loading states:** Unified `"Loading…"` copy
 - **Feedback:** Toasts for actions; left-border color on history items; progress bars on torrents
-- **Keyboard:** `Escape` cascades modal → fullscreen → media → dashboard; `Alt+R` toggles dashboard
+- **Keyboard:** `Escape` cascades modal → fullscreen → media → dashboard; dashboard toggle shortcut is configurable in Settings (default `alt+r`)
 - **Mobile:** Long-press history rows for Copy/Download; pull-to-refresh on Torrents and Cloud lists
 
 ## Design Review Gate
