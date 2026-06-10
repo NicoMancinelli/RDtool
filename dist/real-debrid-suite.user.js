@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.4
+// @version      38.5
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,7 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.4',
+        VERSION: '38.5',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -838,10 +838,13 @@ GM_addStyle(`:root {
             customHosts: '',
             exportFormat: 'raw',
             notificationSound: false,
+            notifyOnQueueComplete: true,
             deepScan: false,
             dedupeHistory: true,
             toggleShortcut: 'alt+r',
-            rememberLastTab: true
+            rememberLastTab: true,
+            switchToTorrentsOnMagnet: false,
+            openDashboardOnMagnet: false
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -951,6 +954,7 @@ GM_addStyle(`:root {
         // Session
         sessionStats: { processed: 0 },
         linksHistoryFilter: '',
+        linksHistoryTypeFilter: 'all',
         lastUrl: location.href
     };
 
@@ -1996,6 +2000,28 @@ GM_addStyle(`:root {
 
     // --- Magnet handling ---
 
+    function finishMagnetAdd(callback) {
+        if (State.settings.switchToTorrentsOnMagnet) {
+            if (!State.isExpanded) {
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
+                State.currentTab = 'torrents';
+                UI.toggleDashboard(true);
+            } else if (State.currentTab !== 'torrents') {
+                State.currentTab = 'torrents';
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
+                UI.renderDashboard();
+                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                    Tabs.Torrents.startPolling();
+                }
+            } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
+                Tabs.Torrents.render();
+            }
+        } else if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') {
+            Tabs.Torrents.render();
+        }
+        if (callback) callback();
+    }
+
     async function addMagnet(magnet, callback = null) {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
@@ -2010,8 +2036,7 @@ GM_addStyle(`:root {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
             if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-            if (callback) callback();
+            finishMagnetAdd(callback);
             return;
         }
 
@@ -2022,7 +2047,7 @@ GM_addStyle(`:root {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
             if (!State.queueProcessing) UI.showToast('Magnet Added!');
-            if (callback) callback();
+            finishMagnetAdd(callback);
             return;
         }
 
@@ -2044,8 +2069,7 @@ GM_addStyle(`:root {
                 await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
                 addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
                 if (!State.queueProcessing) UI.showToast('Main Video Added!');
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-                if (callback) callback();
+                finishMagnetAdd(callback);
             } else {
                 // No video found — fallback to manual
                 showTorrentSelectorModal(torrentId, files, title, callback);
@@ -2066,8 +2090,7 @@ GM_addStyle(`:root {
         await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
         addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
         if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-        if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-        if (callback) callback();
+        finishMagnetAdd(callback);
     }
 
     // --- Torrent file selector modal ---
@@ -2129,8 +2152,7 @@ GM_addStyle(`:root {
             addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
             UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
             modal.close();
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-            if (callback) callback();
+            finishMagnetAdd(callback);
         });
     }
 
@@ -2186,6 +2208,10 @@ GM_addStyle(`:root {
             UI.showToast('Queue cancelled at ' + completed + '/' + total);
         } else {
             UI.showToast('Queue finished (' + total + ')');
+            if (State.settings.notifyOnQueueComplete) {
+                GM_notification({ title: 'RD Queue Complete', text: 'Processed ' + total + ' items', timeout: 4000 });
+            }
+            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         }
     }
 
@@ -2369,11 +2395,29 @@ GM_addStyle(`:root {
                 }
             });
 
+            const typeFilter = State.linksHistoryTypeFilter || 'all';
+            const filterRow = DOM.create('div', { style: 'display:flex; gap:6px; margin-top:8px;' });
+            [['all', 'All'], ['success', 'Success'], ['error', 'Errors']].forEach(([val, label]) => {
+                const chip = DOM.create('button', {
+                    className: 'rd-input-btn' + (typeFilter === val ? ' primary' : ''),
+                    textContent: label,
+                    style: 'flex:1; margin:0;',
+                    onClick: () => {
+                        State.linksHistoryTypeFilter = val;
+                        filterRow.querySelectorAll('button').forEach(b => b.classList.remove('primary'));
+                        chip.classList.add('primary');
+                        const logList = document.getElementById('rd-links-history');
+                        if (logList) this._renderHistory(logList, State.linksHistoryFilter);
+                    }
+                });
+                filterRow.append(chip);
+            });
+
             // History list
             const logList = DOM.create('div', { className: 'rd-log-list', id: 'rd-links-history' });
             this._renderHistory(logList, State.linksHistoryFilter);
 
-            area.append(inputArea, searchInput, logList);
+            area.append(inputArea, searchInput, filterRow, logList);
         },
 
         refresh() {
@@ -2392,9 +2436,12 @@ GM_addStyle(`:root {
             }
 
             let filtered = State.linkHistory;
+            const typeFilter = State.linksHistoryTypeFilter || 'all';
+            if (typeFilter === 'success') filtered = filtered.filter(item => item.type === 'success');
+            else if (typeFilter === 'error') filtered = filtered.filter(item => item.type === 'error');
             if (filterText) {
                 const lf = filterText.toLowerCase();
-                filtered = State.linkHistory.filter(item => {
+                filtered = filtered.filter(item => {
                     const hay = [(item.name || ''), (item.url || ''), (item.msg || '')].join(' ').toLowerCase();
                     return hay.includes(lf);
                 });
@@ -2450,6 +2497,7 @@ GM_addStyle(`:root {
                 ])
             ]);
             if (item.url && item.url !== '#') {
+                row.addEventListener('dblclick', () => UI.copyToClipboard(item.url));
                 addMobileLongPress(row, [
                     { label: 'Copy URL', action: () => UI.copyToClipboard(item.url) },
                     { label: 'Download', action: () => window.open(item.url, '_blank') }
@@ -2477,6 +2525,18 @@ GM_addStyle(`:root {
         return wrapper;
     }
 
+    function isPageLinkUncached(url) {
+        for (const link of document.querySelectorAll('a.rd-processed')) {
+            if ((link.href || '') !== url) continue;
+            const icon = link.nextElementSibling;
+            if (icon && icon.classList.contains('rd-inline-icon')) {
+                return icon.classList.contains('uncached') || !icon.classList.contains('cached');
+            }
+            return true;
+        }
+        return true;
+    }
+
     Tabs.Page = {
         render() {
             const area = document.getElementById('rd-content-area');
@@ -2500,6 +2560,20 @@ GM_addStyle(`:root {
             selectAllChk.checked = true;
             selectAllChk.addEventListener('change', () => { document.querySelectorAll('.rd-page-chk').forEach(c => c.checked = selectAllChk.checked); });
             selectAllLabel.append(selectAllChk, DOM.text('All'));
+
+            const selectUncachedBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Select Uncached', style: 'margin:0;',
+                onClick: () => {
+                    let count = 0;
+                    document.querySelectorAll('.rd-page-chk').forEach(cb => {
+                        cb.checked = isPageLinkUncached(cb.value);
+                        if (cb.checked) count++;
+                    });
+                    selectAllChk.checked = false;
+                    selectAllChk.indeterminate = count > 0 && count < document.querySelectorAll('.rd-page-chk').length;
+                    UI.showToast(count ? 'Selected ' + count + ' uncached' : 'No uncached links found', count ? 'success' : 'error');
+                }
+            });
 
             const dlSelBtn = DOM.create('button', {
                 className: 'rd-input-btn primary', textContent: 'DL Selected', style: 'margin:0;',
@@ -2530,7 +2604,7 @@ GM_addStyle(`:root {
                 }
             });
 
-            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn, queueStatus);
+            leftGroup.append(selectAllLabel, selectUncachedBtn, dlSelBtn, queueBtn, queueStatus);
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -3086,9 +3160,12 @@ GM_addStyle(`:root {
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
+                { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
+                { key: 'openDashboardOnMagnet', label: 'Open Dashboard on Page Magnet', desc: 'Show dashboard when adding a magnet via the inline page icon' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
+                { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
                 { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
                 { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
             ];
@@ -3321,9 +3398,7 @@ const Scanner = {
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
                 const icon = this.injectIcon(link, '\u{1F9F2}', () => {
-                    UI.toggleDashboard(true);
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
+                    if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
                     addMagnet(url);
                 }, url);
                 this.checkMagnetCache(url, icon);

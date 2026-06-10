@@ -98,11 +98,29 @@
                 }
             });
 
+            const typeFilter = State.linksHistoryTypeFilter || 'all';
+            const filterRow = DOM.create('div', { style: 'display:flex; gap:6px; margin-top:8px;' });
+            [['all', 'All'], ['success', 'Success'], ['error', 'Errors']].forEach(([val, label]) => {
+                const chip = DOM.create('button', {
+                    className: 'rd-input-btn' + (typeFilter === val ? ' primary' : ''),
+                    textContent: label,
+                    style: 'flex:1; margin:0;',
+                    onClick: () => {
+                        State.linksHistoryTypeFilter = val;
+                        filterRow.querySelectorAll('button').forEach(b => b.classList.remove('primary'));
+                        chip.classList.add('primary');
+                        const logList = document.getElementById('rd-links-history');
+                        if (logList) this._renderHistory(logList, State.linksHistoryFilter);
+                    }
+                });
+                filterRow.append(chip);
+            });
+
             // History list
             const logList = DOM.create('div', { className: 'rd-log-list', id: 'rd-links-history' });
             this._renderHistory(logList, State.linksHistoryFilter);
 
-            area.append(inputArea, searchInput, logList);
+            area.append(inputArea, searchInput, filterRow, logList);
         },
 
         refresh() {
@@ -121,9 +139,12 @@
             }
 
             let filtered = State.linkHistory;
+            const typeFilter = State.linksHistoryTypeFilter || 'all';
+            if (typeFilter === 'success') filtered = filtered.filter(item => item.type === 'success');
+            else if (typeFilter === 'error') filtered = filtered.filter(item => item.type === 'error');
             if (filterText) {
                 const lf = filterText.toLowerCase();
-                filtered = State.linkHistory.filter(item => {
+                filtered = filtered.filter(item => {
                     const hay = [(item.name || ''), (item.url || ''), (item.msg || '')].join(' ').toLowerCase();
                     return hay.includes(lf);
                 });
@@ -179,6 +200,7 @@
                 ])
             ]);
             if (item.url && item.url !== '#') {
+                row.addEventListener('dblclick', () => UI.copyToClipboard(item.url));
                 addMobileLongPress(row, [
                     { label: 'Copy URL', action: () => UI.copyToClipboard(item.url) },
                     { label: 'Download', action: () => window.open(item.url, '_blank') }
@@ -206,6 +228,18 @@
         return wrapper;
     }
 
+    function isPageLinkUncached(url) {
+        for (const link of document.querySelectorAll('a.rd-processed')) {
+            if ((link.href || '') !== url) continue;
+            const icon = link.nextElementSibling;
+            if (icon && icon.classList.contains('rd-inline-icon')) {
+                return icon.classList.contains('uncached') || !icon.classList.contains('cached');
+            }
+            return true;
+        }
+        return true;
+    }
+
     Tabs.Page = {
         render() {
             const area = document.getElementById('rd-content-area');
@@ -229,6 +263,20 @@
             selectAllChk.checked = true;
             selectAllChk.addEventListener('change', () => { document.querySelectorAll('.rd-page-chk').forEach(c => c.checked = selectAllChk.checked); });
             selectAllLabel.append(selectAllChk, DOM.text('All'));
+
+            const selectUncachedBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Select Uncached', style: 'margin:0;',
+                onClick: () => {
+                    let count = 0;
+                    document.querySelectorAll('.rd-page-chk').forEach(cb => {
+                        cb.checked = isPageLinkUncached(cb.value);
+                        if (cb.checked) count++;
+                    });
+                    selectAllChk.checked = false;
+                    selectAllChk.indeterminate = count > 0 && count < document.querySelectorAll('.rd-page-chk').length;
+                    UI.showToast(count ? 'Selected ' + count + ' uncached' : 'No uncached links found', count ? 'success' : 'error');
+                }
+            });
 
             const dlSelBtn = DOM.create('button', {
                 className: 'rd-input-btn primary', textContent: 'DL Selected', style: 'margin:0;',
@@ -259,7 +307,7 @@
                 }
             });
 
-            leftGroup.append(selectAllLabel, dlSelBtn, queueBtn, queueStatus);
+            leftGroup.append(selectAllLabel, selectUncachedBtn, dlSelBtn, queueBtn, queueStatus);
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -815,9 +863,12 @@
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
+                { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
+                { key: 'openDashboardOnMagnet', label: 'Open Dashboard on Page Magnet', desc: 'Show dashboard when adding a magnet via the inline page icon' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
+                { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
                 { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
                 { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
             ];

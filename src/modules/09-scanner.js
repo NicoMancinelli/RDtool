@@ -81,9 +81,7 @@ const Scanner = {
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
                 const icon = this.injectIcon(link, '\u{1F9F2}', () => {
-                    UI.toggleDashboard(true);
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
+                    if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
                     addMagnet(url);
                 }, url);
                 this.checkMagnetCache(url, icon);

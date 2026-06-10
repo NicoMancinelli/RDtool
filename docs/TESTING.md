@@ -27,6 +27,13 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Import JSON merges valid entries from exported file; invalid file shows error toast; toast reports import count
 - [ ] Drag-and-drop link onto dashboard processes it
 - [ ] Session counter in header increments on success
+- [ ] Search bar filters history; All/Success/Errors chips work
+- [ ] Paste button fills textarea from clipboard
+- [ ] Ctrl+Enter / Cmd+Enter triggers Unrestrict
+- [ ] Copy All URLs copies newline-separated links with count toast
+- [ ] Double-click success row copies URL
+- [ ] Clear history shows confirmation dialog
+- [ ] Dedupe: same URL replaces older entry when setting enabled
 
 ## Page Tab
 
@@ -36,6 +43,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Select All + DL Selected works
 - [ ] Queue adds items to processing
 - [ ] 1-Click on individual link unrestricts
+- [ ] Select Uncached checks only non-cached links
 
 ## Magnets & Torrent Modal (critical path)
 
@@ -90,7 +98,15 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 ## Keyboard
 
 - [ ] Dashboard toggle shortcut works (default `alt+r`; customizable in Settings → Preferences)
+- [ ] `?` opens shortcuts help when dashboard focused (not typing in a field)
 - [ ] `Escape` closes modal, then player, then dashboard
+
+## QoL Settings (v38.4+)
+
+- [ ] Remember Last Tab restores tab on dashboard open
+- [ ] Switch to Torrents on Magnet jumps to Torrents after add
+- [ ] Open Dashboard on Page Magnet shows UI on inline magnet click
+- [ ] Notify on Queue Complete shows notification when batch finishes
 
 ## Regression Checks (v37.1 / v38.0)
 

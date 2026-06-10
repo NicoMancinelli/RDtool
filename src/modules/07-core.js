@@ -138,6 +138,28 @@
 
     // --- Magnet handling ---
 
+    function finishMagnetAdd(callback) {
+        if (State.settings.switchToTorrentsOnMagnet) {
+            if (!State.isExpanded) {
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
+                State.currentTab = 'torrents';
+                UI.toggleDashboard(true);
+            } else if (State.currentTab !== 'torrents') {
+                State.currentTab = 'torrents';
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
+                UI.renderDashboard();
+                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                    Tabs.Torrents.startPolling();
+                }
+            } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
+                Tabs.Torrents.render();
+            }
+        } else if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') {
+            Tabs.Torrents.render();
+        }
+        if (callback) callback();
+    }
+
     async function addMagnet(magnet, callback = null) {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
@@ -152,8 +174,7 @@
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
             if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-            if (callback) callback();
+            finishMagnetAdd(callback);
             return;
         }
 
@@ -164,7 +185,7 @@
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
             addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
             if (!State.queueProcessing) UI.showToast('Magnet Added!');
-            if (callback) callback();
+            finishMagnetAdd(callback);
             return;
         }
 
@@ -186,8 +207,7 @@
                 await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
                 addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
                 if (!State.queueProcessing) UI.showToast('Main Video Added!');
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-                if (callback) callback();
+                finishMagnetAdd(callback);
             } else {
                 // No video found — fallback to manual
                 showTorrentSelectorModal(torrentId, files, title, callback);
@@ -208,8 +228,7 @@
         await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
         addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
         if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-        if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-        if (callback) callback();
+        finishMagnetAdd(callback);
     }
 
     // --- Torrent file selector modal ---
@@ -271,8 +290,7 @@
             addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
             UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
             modal.close();
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
-            if (callback) callback();
+            finishMagnetAdd(callback);
         });
     }
 
@@ -328,6 +346,10 @@
             UI.showToast('Queue cancelled at ' + completed + '/' + total);
         } else {
             UI.showToast('Queue finished (' + total + ')');
+            if (State.settings.notifyOnQueueComplete) {
+                GM_notification({ title: 'RD Queue Complete', text: 'Processed ' + total + ' items', timeout: 4000 });
+            }
+            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         }
     }
 

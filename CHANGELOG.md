@@ -4,6 +4,17 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.5] - 2026-06-10
+
+### Added
+
+- Page tab Select Uncached button — checks only links not cached on RD (magnet inline icons)
+- Switch to Torrents on Magnet setting (default off) — jumps to the Torrents tab after a magnet add succeeds
+- Open Dashboard on Page Magnet setting (default off) — shows the dashboard when adding a magnet via the inline page icon
+- Links tab history type filters — All | Success | Errors chip row filters history alongside search (session-persisted)
+- Double-click on successful history row copies URL to clipboard with toast
+- Notify on Queue Complete setting (default on) — `GM_notification` when batch queue finishes; optional chime when Notification Sound is enabled
+
 ## [38.4] - 2026-06-10
 
 ### Added

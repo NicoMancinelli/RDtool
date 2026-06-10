@@ -33,6 +33,7 @@
         // Session
         sessionStats: { processed: 0 },
         linksHistoryFilter: '',
+        linksHistoryTypeFilter: 'all',
         lastUrl: location.href
     };
 
