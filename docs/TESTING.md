@@ -34,6 +34,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Double-click success row copies URL
 - [ ] Clear history shows confirmation dialog
 - [ ] Dedupe: same URL replaces older entry when setting enabled
+- [ ] Failed items show Retry when sourceUrl present; Retry Errors batch works
 
 ## Page Tab
 
@@ -44,6 +45,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Queue adds items to processing
 - [ ] 1-Click on individual link unrestricts
 - [ ] Select Uncached checks only non-cached links
+- [ ] Invert flips checkbox selection state
 - [ ] Copy URLs copies checked host URLs with count toast
 
 ## Magnets & Torrent Modal (critical path)
@@ -64,6 +66,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Search filters list
 - [ ] Pull-to-refresh on mobile reloads list
 - [ ] Copy URLs copies checked completed download links with count toast; error toast when none available
+- [ ] Torrent Refresh Interval setting changes poll rate (Settings)
 
 ## Cloud Tab
 

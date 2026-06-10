@@ -2,7 +2,7 @@
     // =========================================================================
 
     const Config = {
-        VERSION: '38.6',
+        VERSION: '38.7',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -32,7 +32,8 @@
             rememberLastTab: true,
             rememberDashboardOpen: false,
             switchToTorrentsOnMagnet: false,
-            openDashboardOnMagnet: false
+            openDashboardOnMagnet: false,
+            torrentPollInterval: '4'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),

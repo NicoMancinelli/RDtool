@@ -25,7 +25,7 @@
     async function unrestrictLink(url, silent = false) {
         const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
         if (!ok) {
-            addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error });
+            addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error, sourceUrl: url });
             return null;
         }
         const dlUrl = data.download;
@@ -69,7 +69,7 @@
             if (callback && firstUrl) callback(firstUrl);
             return firstUrl;
         }
-        addToHistory({ type: 'error', msg: 'Failed: ' + (error || 'Unknown error') });
+        addToHistory({ type: 'error', msg: 'Failed: ' + (error || 'Unknown error'), sourceUrl: url });
         if (callback) callback(null);
         return null;
     }
@@ -164,7 +164,7 @@
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
         if (!ok) {
-            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error });
+            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
             return;
         }
 
@@ -411,6 +411,25 @@
         if (item.type === 'error') return typeof item.msg === 'string';
         if (item.type === 'success') return typeof item.name === 'string' && !!(item.url || item.download);
         return false;
+    }
+
+    async function retryHistoryItem(item) {
+        const url = item && item.sourceUrl;
+        if (!url) return UI.showToast('No source URL to retry', 'error');
+        UI.showToast('Retrying...');
+        if (url.startsWith('magnet:')) await addMagnet(url);
+        else await unrestrictLinkOrFolder(url);
+    }
+
+    async function retryAllErrors() {
+        const retryable = State.linkHistory.filter(h => h.type === 'error' && h.sourceUrl);
+        if (!retryable.length) return UI.showToast('No retryable errors', 'error');
+        UI.showToast('Retrying ' + retryable.length + ' item(s)...');
+        for (const item of retryable) {
+            if (item.sourceUrl.startsWith('magnet:')) await addMagnet(item.sourceUrl);
+            else await unrestrictLinkOrFolder(item.sourceUrl, true);
+        }
+        UI.showToast('Retry complete');
     }
 
     function importHistoryJson(file) {

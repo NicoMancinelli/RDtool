@@ -4,6 +4,14 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.7] - 2026-06-10
+
+### Added
+
+- Retry failed history items — per-item Retry button and Retry Errors batch action (stores `sourceUrl` on new failures)
+- Invert selection button on Page tab
+- Torrent Refresh Interval setting (3–30 seconds) in Settings; restarts polling when changed
+
 ## [38.6] - 2026-06-10
 
 ### Added

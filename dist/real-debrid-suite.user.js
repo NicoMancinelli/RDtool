@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.6
+// @version      38.7
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,7 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.6',
+        VERSION: '38.7',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -845,7 +845,8 @@ GM_addStyle(`:root {
             rememberLastTab: true,
             rememberDashboardOpen: false,
             switchToTorrentsOnMagnet: false,
-            openDashboardOnMagnet: false
+            openDashboardOnMagnet: false,
+            torrentPollInterval: '4'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -1899,7 +1900,7 @@ GM_addStyle(`:root {
     async function unrestrictLink(url, silent = false) {
         const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
         if (!ok) {
-            addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error });
+            addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error, sourceUrl: url });
             return null;
         }
         const dlUrl = data.download;
@@ -1943,7 +1944,7 @@ GM_addStyle(`:root {
             if (callback && firstUrl) callback(firstUrl);
             return firstUrl;
         }
-        addToHistory({ type: 'error', msg: 'Failed: ' + (error || 'Unknown error') });
+        addToHistory({ type: 'error', msg: 'Failed: ' + (error || 'Unknown error'), sourceUrl: url });
         if (callback) callback(null);
         return null;
     }
@@ -2038,7 +2039,7 @@ GM_addStyle(`:root {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
         if (!ok) {
-            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error });
+            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
             return;
         }
 
@@ -2287,6 +2288,25 @@ GM_addStyle(`:root {
         return false;
     }
 
+    async function retryHistoryItem(item) {
+        const url = item && item.sourceUrl;
+        if (!url) return UI.showToast('No source URL to retry', 'error');
+        UI.showToast('Retrying...');
+        if (url.startsWith('magnet:')) await addMagnet(url);
+        else await unrestrictLinkOrFolder(url);
+    }
+
+    async function retryAllErrors() {
+        const retryable = State.linkHistory.filter(h => h.type === 'error' && h.sourceUrl);
+        if (!retryable.length) return UI.showToast('No retryable errors', 'error');
+        UI.showToast('Retrying ' + retryable.length + ' item(s)...');
+        for (const item of retryable) {
+            if (item.sourceUrl.startsWith('magnet:')) await addMagnet(item.sourceUrl);
+            else await unrestrictLinkOrFolder(item.sourceUrl, true);
+        }
+        UI.showToast('Retry complete');
+    }
+
     function importHistoryJson(file) {
         const reader = new FileReader();
         reader.onload = () => {
@@ -2424,6 +2444,11 @@ GM_addStyle(`:root {
                 });
                 filterRow.append(chip);
             });
+            const retryErrorsBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Retry Errors', style: 'margin:0;',
+                onClick: () => retryAllErrors()
+            });
+            filterRow.append(retryErrorsBtn);
 
             // History list
             const logList = DOM.create('div', { className: 'rd-log-list', id: 'rd-links-history' });
@@ -2475,13 +2500,26 @@ GM_addStyle(`:root {
 
         _buildHistoryItem(item) {
             if (item.type === 'error') {
-                const errEl = DOM.create('div', { className: 'rd-log-item error' }, [
+                const content = [
                     DOM.create('div', { className: 'rd-item-content' }, [
                         DOM.create('div', { className: 'rd-filename', style: 'color:var(--rd-danger);', textContent: item.msg || 'Error' }),
-                        DOM.create('div', { className: 'rd-meta', textContent: item.time || '' })
-                    ])
-                ]);
-                return errEl;
+                        DOM.create('div', { className: 'rd-meta' }, [
+                            DOM.create('span', { textContent: item.time || '' }),
+                            item.sourceUrl ? DOM.create('span', {
+                                textContent: item.sourceUrl.length > 40 ? item.sourceUrl.slice(0, 40) + '…' : item.sourceUrl,
+                                title: item.sourceUrl,
+                                style: 'margin-left:8px;opacity:0.7;'
+                            }) : null
+                        ].filter(Boolean)),
+                        item.sourceUrl ? DOM.create('div', { className: 'rd-btn-group' }, [
+                            DOM.create('button', {
+                                className: 'rd-action-btn', textContent: 'Retry',
+                                onClick: () => retryHistoryItem(item)
+                            })
+                        ]) : null
+                    ].filter(Boolean))
+                ];
+                return DOM.create('div', { className: 'rd-log-item error' }, content);
             }
             const isMedia = /\.(mp4|mkv|avi|mov|mp3|flac|wav|jpg|png|webp)$/i.test(item.name || '');
             const btns = [
@@ -2598,6 +2636,17 @@ GM_addStyle(`:root {
                     UI.showToast(count ? 'Selected ' + count + ' uncached' : 'No uncached links found', count ? 'success' : 'error');
                 }
             });
+            const invertSelBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
+                onClick: () => {
+                    const boxes = document.querySelectorAll('.rd-page-chk');
+                    let checked = 0;
+                    boxes.forEach(cb => { cb.checked = !cb.checked; if (cb.checked) checked++; });
+                    selectAllChk.checked = checked === boxes.length;
+                    selectAllChk.indeterminate = checked > 0 && checked < boxes.length;
+                    UI.showToast('Inverted selection (' + checked + ' selected)');
+                }
+            });
 
             const dlSelBtn = DOM.create('button', {
                 className: 'rd-input-btn primary', textContent: 'DL Selected', style: 'margin:0;',
@@ -2631,6 +2680,7 @@ GM_addStyle(`:root {
             leftGroup.append(
                 selectAllLabel,
                 selectUncachedBtn,
+                invertSelBtn,
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value).filter(u => u)),
                 dlSelBtn,
                 queueBtn,
@@ -2889,7 +2939,8 @@ GM_addStyle(`:root {
             this.stopPolling();
             if (State.apiKey && !document.hidden) {
                 this._fetchTorrents(true);
-                this._pollingInterval = setInterval(() => this._fetchTorrents(false), 4000);
+                const pollMs = Math.max(3, parseInt(State.settings.torrentPollInterval, 10) || 4) * 1000;
+                this._pollingInterval = setInterval(() => this._fetchTorrents(false), pollMs);
             }
         },
 
@@ -3235,6 +3286,11 @@ GM_addStyle(`:root {
             wrapper.append(this._buildSelectRow('Export Format', 'exportFormat', [
                 ['raw', 'Plain Text'], ['curl', 'cURL'], ['wget', 'Wget']
             ]));
+            wrapper.append(this._buildSelectRow('Torrent Refresh Interval', 'torrentPollInterval', [
+                ['3', '3 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']
+            ], () => {
+                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents) Tabs.Torrents.startPolling();
+            }));
 
             // Text inputs
             wrapper.append(this._buildTextRow('Dashboard Toggle Shortcut', 'toggleShortcut', State.settings.toggleShortcut));
@@ -3301,16 +3357,21 @@ GM_addStyle(`:root {
             return row;
         },
 
-        _buildSelectRow(label, key, options) {
+        _buildSelectRow(label, key, options, onChange) {
             const row = DOM.create('div', { className: 'rd-account-row', style: 'display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--rd-glass-border); font-size:12px;' });
             row.append(DOM.create('span', { textContent: label }));
             const select = DOM.create('select', { className: 'rd-select' });
             for (const [val, text] of options) {
                 const opt = DOM.create('option', { value: val, textContent: text });
-                if (State.settings[key] === val) opt.selected = true;
+                if (String(State.settings[key]) === val) opt.selected = true;
                 select.append(opt);
             }
-            select.addEventListener('change', () => { State.settings[key] = select.value; saveSettings(); UI.showToast(label + ' Updated'); });
+            select.addEventListener('change', () => {
+                State.settings[key] = select.value;
+                saveSettings();
+                UI.showToast(label + ' Updated');
+                if (onChange) onChange();
+            });
             row.append(select);
             return row;
         },
