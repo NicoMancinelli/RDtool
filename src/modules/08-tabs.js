@@ -30,10 +30,24 @@
             // Export controls
             const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
-            exportRow.append(DOM.create('button', {
-                className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
-                onClick: () => exportHistoryJson()
-            }));
+            exportRow.append(
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Import JSON', style: 'margin:0;',
+                    onClick: () => {
+                        const input = DOM.create('input', { type: 'file', accept: '.json' });
+                        input.addEventListener('change', () => {
+                            const file = input.files[0];
+                            if (!file) return;
+                            importHistoryJson(file);
+                        });
+                        input.click();
+                    }
+                }),
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
+                    onClick: () => exportHistoryJson()
+                })
+            );
 
             inputArea.append(textarea, btnRow, exportRow);
 

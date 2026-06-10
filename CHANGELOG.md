@@ -4,6 +4,12 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.3] - 2026-06-10
+
+### Added
+
+- Import JSON button on Links tab — merges validated history entries from `rd-link-history.json` (cap 500)
+
 ## [38.2] - 2026-06-10
 
 ### Added

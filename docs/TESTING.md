@@ -24,6 +24,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Clear empties history
 - [ ] Export produces plain text / curl / wget format
 - [ ] Export JSON downloads `rd-link-history.json` with full history array; empty history shows error toast
+- [ ] Import JSON merges valid entries from exported file; invalid file shows error toast; toast reports import count
 - [ ] Drag-and-drop link onto dashboard processes it
 - [ ] Session counter in header increments on success
 

@@ -373,3 +373,29 @@
         URL.revokeObjectURL(url);
         UI.showToast('History Exported');
     }
+
+    function isValidHistoryItem(item) {
+        if (!item || typeof item !== 'object' || !item.type) return false;
+        if (item.type === 'error') return typeof item.msg === 'string';
+        if (item.type === 'success') return typeof item.name === 'string' && !!(item.url || item.download);
+        return false;
+    }
+
+    function importHistoryJson(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const data = JSON.parse(reader.result);
+                if (!Array.isArray(data)) throw new Error('Expected array');
+                const valid = data.filter(isValidHistoryItem);
+                if (!valid.length) throw new Error('No valid items');
+                State.linkHistory = State.linkHistory.concat(valid).slice(-500);
+                GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
+                if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.render();
+                UI.showToast(valid.length + ' item(s) imported');
+            } catch (e) {
+                UI.showToast('Invalid history file', 'error');
+            }
+        };
+        reader.readAsText(file);
+    }

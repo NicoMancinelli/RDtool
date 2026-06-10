@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.2
+// @version      38.3
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -1508,7 +1508,7 @@ GM_addStyle(`:root {
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v38.2',
+                        textContent: 'v38.3',
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
@@ -2133,6 +2133,32 @@ GM_addStyle(`:root {
         UI.showToast('History Exported');
     }
 
+    function isValidHistoryItem(item) {
+        if (!item || typeof item !== 'object' || !item.type) return false;
+        if (item.type === 'error') return typeof item.msg === 'string';
+        if (item.type === 'success') return typeof item.name === 'string' && !!(item.url || item.download);
+        return false;
+    }
+
+    function importHistoryJson(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const data = JSON.parse(reader.result);
+                if (!Array.isArray(data)) throw new Error('Expected array');
+                const valid = data.filter(isValidHistoryItem);
+                if (!valid.length) throw new Error('No valid items');
+                State.linkHistory = State.linkHistory.concat(valid).slice(-500);
+                GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
+                if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.render();
+                UI.showToast(valid.length + ' item(s) imported');
+            } catch (e) {
+                UI.showToast('Invalid history file', 'error');
+            }
+        };
+        reader.readAsText(file);
+    }
+
 
 // ===================== Tabs (Links + Page) =====================
 
@@ -2166,10 +2192,24 @@ GM_addStyle(`:root {
             // Export controls
             const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
-            exportRow.append(DOM.create('button', {
-                className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
-                onClick: () => exportHistoryJson()
-            }));
+            exportRow.append(
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Import JSON', style: 'margin:0;',
+                    onClick: () => {
+                        const input = DOM.create('input', { type: 'file', accept: '.json' });
+                        input.addEventListener('change', () => {
+                            const file = input.files[0];
+                            if (!file) return;
+                            importHistoryJson(file);
+                        });
+                        input.click();
+                    }
+                }),
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Export JSON', style: 'margin:0;',
+                    onClick: () => exportHistoryJson()
+                })
+            );
 
             inputArea.append(textarea, btnRow, exportRow);
 
