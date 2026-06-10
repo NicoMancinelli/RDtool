@@ -4,6 +4,23 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.4] - 2026-06-10
+
+### Added
+
+- Copy All URLs button on Links tab — copies all successful download URLs (newline-separated) with count toast
+- Dedupe Link History setting (default on) — replaces older entries when the same download URL is added again
+- `Config.VERSION` constant — dashboard header reads version from config instead of hardcoded string
+- Remember Last Tab setting (default on) — restores the last active dashboard tab on open
+- Links tab history search bar — filter by filename, URL, or error message (session-persisted)
+- Paste button next to Unrestrict — reads clipboard into the input textarea
+- Ctrl+Enter / Cmd+Enter in Links textarea triggers Unrestrict
+- Keyboard shortcuts help — press `?` in dashboard or click `?` in header to open shortcuts modal
+
+### Changed
+
+- Clear history button now asks for confirmation before wiping link history
+
 ## [38.3] - 2026-06-10
 
 ### Added

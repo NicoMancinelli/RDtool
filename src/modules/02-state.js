@@ -32,6 +32,7 @@
         queueTotal: 0,
         // Session
         sessionStats: { processed: 0 },
+        linksHistoryFilter: '',
         lastUrl: location.href
     };
 
@@ -47,6 +48,13 @@
     State.settings = {};
     for (const key of Object.keys(Config.defaultSettings)) {
         State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
+    }
+
+    if (State.settings.rememberLastTab) {
+        const lastTab = GM_getValue('rd_last_tab', 'links');
+        if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+            State.currentTab = lastTab;
+        }
     }
 
     // Load and validate history (cap at 500)

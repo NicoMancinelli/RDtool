@@ -1,6 +1,6 @@
 {
   "name": "rdtool",
-  "version": "38.3.0",
+  "version": "38.4.0",
   "description": "Real-Debrid Suite Tampermonkey userscript",
   "private": true,
   "type": "module",

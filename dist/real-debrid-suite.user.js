@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.3
+// @version      38.4
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,6 +815,8 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
+        VERSION: '38.4',
+
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
             'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',
@@ -837,7 +839,9 @@ GM_addStyle(`:root {
             exportFormat: 'raw',
             notificationSound: false,
             deepScan: false,
-            toggleShortcut: 'alt+r'
+            dedupeHistory: true,
+            toggleShortcut: 'alt+r',
+            rememberLastTab: true
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -946,6 +950,7 @@ GM_addStyle(`:root {
         queueTotal: 0,
         // Session
         sessionStats: { processed: 0 },
+        linksHistoryFilter: '',
         lastUrl: location.href
     };
 
@@ -961,6 +966,13 @@ GM_addStyle(`:root {
     State.settings = {};
     for (const key of Object.keys(Config.defaultSettings)) {
         State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
+    }
+
+    if (State.settings.rememberLastTab) {
+        const lastTab = GM_getValue('rd_last_tab', 'links');
+        if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+            State.currentTab = lastTab;
+        }
     }
 
     // Load and validate history (cap at 500)
@@ -1275,6 +1287,12 @@ GM_addStyle(`:root {
 // --- Step 2: UI Module ---
     const LIGHTNING_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
 
+    function isTypingInField(target) {
+        if (!target || !target.tagName) return false;
+        const tag = target.tagName.toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+    }
+
     const UI = {
         init() {
             // Main container
@@ -1327,6 +1345,10 @@ GM_addStyle(`:root {
                 if (Config.matchesShortcut(e, State.settings.toggleShortcut)) {
                     e.preventDefault();
                     UI.toggleDashboard(!State.isExpanded);
+                }
+                if (State.isExpanded && e.key === '?' && !isTypingInField(e.target)) {
+                    e.preventDefault();
+                    UI.showShortcutsModal();
                 }
             });
 
@@ -1470,6 +1492,12 @@ GM_addStyle(`:root {
 
             if (show) {
                 State.isExpanded = true;
+                if (State.settings.rememberLastTab) {
+                    const lastTab = GM_getValue('rd_last_tab', 'links');
+                    if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+                        State.currentTab = lastTab;
+                    }
+                }
                 // Reset container inline style in case setup changed it
                 container.style.cssText = '';
                 container.classList.remove('rd-hidden');
@@ -1508,7 +1536,7 @@ GM_addStyle(`:root {
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v38.3',
+                        textContent: 'v' + Config.VERSION,
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
@@ -1533,12 +1561,21 @@ GM_addStyle(`:root {
                         }
                     })
                 ]),
-                DOM.create('span', {
-                    textContent: '\u2715',
-                    style: 'cursor:pointer;color:var(--rd-text-secondary);font-size:16px;padding:4px 8px;',
-                    className: 'rd-close-btn',
-                    onClick: () => UI.toggleDashboard(false)
-                })
+                DOM.create('div', { style: 'display:flex;align-items:center;gap:4px;' }, [
+                    DOM.create('button', {
+                        className: 'rd-input-btn',
+                        textContent: '?',
+                        title: 'Keyboard shortcuts',
+                        style: 'margin:0;padding:2px 8px;font-size:12px;min-width:28px;',
+                        onClick: () => UI.showShortcutsModal()
+                    }),
+                    DOM.create('span', {
+                        textContent: '\u2715',
+                        style: 'cursor:pointer;color:var(--rd-text-secondary);font-size:16px;padding:4px 8px;',
+                        className: 'rd-close-btn',
+                        onClick: () => UI.toggleDashboard(false)
+                    })
+                ])
             ]);
 
             // Tabs
@@ -1571,6 +1608,9 @@ GM_addStyle(`:root {
                         }
 
                         State.currentTab = t.key;
+                        if (State.settings.rememberLastTab) {
+                            GM_setValue('rd_last_tab', t.key);
+                        }
 
                         // Update active class on all tabs
                         tabs.querySelectorAll('.rd-tab').forEach(tb => tb.classList.remove('active'));
@@ -1635,6 +1675,65 @@ GM_addStyle(`:root {
                     if (toast.parentNode) toast.parentNode.removeChild(toast);
                 }, 300);
             }, 3000);
+        },
+
+        showShortcutsModal() {
+            if (document.querySelector('.rd-modal-overlay')) return;
+
+            const formatShortcut = (str) => (str || '').split('+').map((part) => {
+                const p = part.trim().toLowerCase();
+                if (p === 'alt') return 'Alt';
+                if (p === 'ctrl' || p === 'control') return 'Ctrl';
+                if (p === 'shift') return 'Shift';
+                if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
+                return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
+            }).join('+');
+
+            const shortcutRow = (keys, desc) => DOM.create('div', {
+                style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid var(--rd-glass-border);font-size:12px;'
+            }, [
+                DOM.create('span', { textContent: keys, style: 'color:var(--rd-text-primary);font-family:monospace;white-space:nowrap;' }),
+                DOM.create('span', { textContent: desc, style: 'color:var(--rd-text-secondary);text-align:right;' })
+            ]);
+
+            const section = (title, rows) => {
+                const wrap = DOM.create('div', { style: 'margin-bottom:12px;' });
+                wrap.appendChild(DOM.create('div', {
+                    textContent: title,
+                    style: 'font-size:11px;font-weight:bold;color:var(--rd-text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;'
+                }));
+                rows.forEach((row) => wrap.appendChild(row));
+                return wrap;
+            };
+
+            const content = DOM.create('div', { style: 'display:flex;flex-direction:column;' }, [
+                section('General', [
+                    shortcutRow(formatShortcut(State.settings.toggleShortcut), 'Toggle dashboard'),
+                    shortcutRow('Esc', 'Close (modal \u2192 fullscreen \u2192 media \u2192 dashboard)'),
+                    shortcutRow('?', 'Show this help')
+                ]),
+                section('Links', [
+                    shortcutRow('Ctrl+Enter / Cmd+Enter', 'Unrestrict')
+                ]),
+                section('Media player', [
+                    shortcutRow('Space', 'Play / pause'),
+                    shortcutRow('\u2190 / \u2192', 'Seek \u00b110s'),
+                    shortcutRow('\u2191 / \u2193', 'Volume \u00b110%'),
+                    shortcutRow('F', 'Toggle fullscreen'),
+                    shortcutRow('P', 'Picture-in-picture'),
+                    shortcutRow('M', 'Mute'),
+                    shortcutRow('Esc', 'Exit fullscreen or close player')
+                ])
+            ]);
+
+            let modalRef;
+            const closeBtn = DOM.create('button', {
+                className: 'rd-input-btn',
+                textContent: 'Close',
+                style: 'margin:0;',
+                onClick: () => modalRef && modalRef.close()
+            });
+            modalRef = UI.showModal('Keyboard Shortcuts', [content], [closeBtn]);
         },
 
         showModal(title, contentElements, footerElements) {
@@ -1761,6 +1860,16 @@ GM_addStyle(`:root {
 
     function addToHistory(item) {
         item.time = item.time || new Date().toLocaleTimeString();
+        if (State.settings.dedupeHistory && item.type === 'success') {
+            const urlKey = item.download || item.url;
+            if (urlKey && urlKey !== '#') {
+                State.linkHistory = State.linkHistory.filter(h => {
+                    if (h.type !== 'success') return true;
+                    const existing = h.download || h.url;
+                    return !existing || existing === '#' || existing !== urlKey;
+                });
+            }
+        }
         State.linkHistory.push(item);
         if (State.linkHistory.length > 500) State.linkHistory = State.linkHistory.slice(-500);
         GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
@@ -2174,7 +2283,13 @@ GM_addStyle(`:root {
             const inputArea = DOM.create('div', { className: 'rd-input-area' });
             const textarea = DOM.create('textarea', {
                 id: 'rd-manual-input', className: 'rd-textarea',
-                placeholder: 'Paste links, folders, magnets, or Base64...'
+                placeholder: 'Paste links, folders, magnets, or Base64...',
+                onKeydown: (e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handleManualInput();
+                    }
+                }
             });
             const btnRow = DOM.create('div', { style: 'display:flex; gap:8px; margin-top:8px;' });
             const unrestrictBtn = DOM.create('button', {
@@ -2182,17 +2297,47 @@ GM_addStyle(`:root {
                 textContent: 'Unrestrict', style: 'flex:2;',
                 onClick: () => handleManualInput()
             });
+            const pasteBtn = DOM.create('button', {
+                id: 'rd-btn-paste', className: 'rd-input-btn',
+                textContent: 'Paste', style: 'flex:1;',
+                onClick: async () => {
+                    try {
+                        const text = await navigator.clipboard.readText();
+                        textarea.value = text;
+                    } catch (e) {
+                        UI.showToast('Clipboard access denied', 'error');
+                    }
+                }
+            });
             const clearBtn = DOM.create('button', {
                 id: 'rd-btn-clear', className: 'rd-input-btn',
                 textContent: 'Clear', style: 'flex:1;',
-                onClick: () => { State.linkHistory = []; GM_setValue('rd_link_history', '[]'); Tabs.Links.render(); UI.showToast('History Cleared'); }
+                onClick: () => {
+                    if (!confirm('Clear all link history?')) return;
+                    State.linkHistory = [];
+                    GM_setValue('rd_link_history', '[]');
+                    Tabs.Links.render();
+                    UI.showToast('History Cleared');
+                }
             });
-            btnRow.append(unrestrictBtn, clearBtn);
+            btnRow.append(unrestrictBtn, pasteBtn, clearBtn);
 
             // Export controls
             const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
             exportRow.append(
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Copy All URLs', style: 'margin:0;',
+                    onClick: (e) => {
+                        const urls = State.linkHistory
+                            .filter(h => h.type === 'success')
+                            .map(h => h.download || h.url)
+                            .filter(u => u && u !== '#');
+                        if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
+                        UI.copyToClipboard(urls.join('\n'), e.currentTarget);
+                        UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
+                    }
+                }),
                 DOM.create('button', {
                     className: 'rd-input-btn', textContent: 'Import JSON', style: 'margin:0;',
                     onClick: () => {
@@ -2213,19 +2358,30 @@ GM_addStyle(`:root {
 
             inputArea.append(textarea, btnRow, exportRow);
 
+            const searchInput = DOM.create('input', {
+                type: 'text', id: 'rd-search-links', className: 'rd-search-bar',
+                placeholder: 'Search History...', value: State.linksHistoryFilter || '',
+                style: 'margin:0; margin-top:8px;',
+                onInput: (e) => {
+                    State.linksHistoryFilter = e.target.value;
+                    const logList = document.getElementById('rd-links-history');
+                    if (logList) this._renderHistory(logList, State.linksHistoryFilter);
+                }
+            });
+
             // History list
             const logList = DOM.create('div', { className: 'rd-log-list', id: 'rd-links-history' });
-            this._renderHistory(logList);
+            this._renderHistory(logList, State.linksHistoryFilter);
 
-            area.append(inputArea, logList);
+            area.append(inputArea, searchInput, logList);
         },
 
         refresh() {
             const logList = document.getElementById('rd-links-history');
-            if (logList) this._renderHistory(logList);
+            if (logList) this._renderHistory(logList, State.linksHistoryFilter);
         },
 
-        _renderHistory(container) {
+        _renderHistory(container, filterText) {
             DOM.clear(container);
             if (State.linkHistory.length === 0) {
                 container.append(DOM.create('div', {
@@ -2234,10 +2390,27 @@ GM_addStyle(`:root {
                 }));
                 return;
             }
+
+            let filtered = State.linkHistory;
+            if (filterText) {
+                const lf = filterText.toLowerCase();
+                filtered = State.linkHistory.filter(item => {
+                    const hay = [(item.name || ''), (item.url || ''), (item.msg || '')].join(' ').toLowerCase();
+                    return hay.includes(lf);
+                });
+            }
+
+            if (filtered.length === 0) {
+                container.append(DOM.create('div', {
+                    style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);',
+                    textContent: 'No matching history.'
+                }));
+                return;
+            }
+
             // Render in reverse chronological order
-            for (let i = State.linkHistory.length - 1; i >= 0; i--) {
-                const item = State.linkHistory[i];
-                container.append(this._buildHistoryItem(item));
+            for (let i = filtered.length - 1; i >= 0; i--) {
+                container.append(this._buildHistoryItem(filtered[i]));
             }
         },
 
@@ -2912,10 +3085,12 @@ GM_addStyle(`:root {
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
+                { key: 'rememberLastTab', label: 'Remember Last Tab' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
-                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' }
+                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
+                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));

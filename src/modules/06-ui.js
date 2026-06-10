@@ -1,6 +1,12 @@
 // --- Step 2: UI Module ---
     const LIGHTNING_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
 
+    function isTypingInField(target) {
+        if (!target || !target.tagName) return false;
+        const tag = target.tagName.toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+    }
+
     const UI = {
         init() {
             // Main container
@@ -53,6 +59,10 @@
                 if (Config.matchesShortcut(e, State.settings.toggleShortcut)) {
                     e.preventDefault();
                     UI.toggleDashboard(!State.isExpanded);
+                }
+                if (State.isExpanded && e.key === '?' && !isTypingInField(e.target)) {
+                    e.preventDefault();
+                    UI.showShortcutsModal();
                 }
             });
 
@@ -196,6 +206,12 @@
 
             if (show) {
                 State.isExpanded = true;
+                if (State.settings.rememberLastTab) {
+                    const lastTab = GM_getValue('rd_last_tab', 'links');
+                    if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+                        State.currentTab = lastTab;
+                    }
+                }
                 // Reset container inline style in case setup changed it
                 container.style.cssText = '';
                 container.classList.remove('rd-hidden');
@@ -234,7 +250,7 @@
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v38.3',
+                        textContent: 'v' + Config.VERSION,
                         style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
@@ -259,12 +275,21 @@
                         }
                     })
                 ]),
-                DOM.create('span', {
-                    textContent: '\u2715',
-                    style: 'cursor:pointer;color:var(--rd-text-secondary);font-size:16px;padding:4px 8px;',
-                    className: 'rd-close-btn',
-                    onClick: () => UI.toggleDashboard(false)
-                })
+                DOM.create('div', { style: 'display:flex;align-items:center;gap:4px;' }, [
+                    DOM.create('button', {
+                        className: 'rd-input-btn',
+                        textContent: '?',
+                        title: 'Keyboard shortcuts',
+                        style: 'margin:0;padding:2px 8px;font-size:12px;min-width:28px;',
+                        onClick: () => UI.showShortcutsModal()
+                    }),
+                    DOM.create('span', {
+                        textContent: '\u2715',
+                        style: 'cursor:pointer;color:var(--rd-text-secondary);font-size:16px;padding:4px 8px;',
+                        className: 'rd-close-btn',
+                        onClick: () => UI.toggleDashboard(false)
+                    })
+                ])
             ]);
 
             // Tabs
@@ -297,6 +322,9 @@
                         }
 
                         State.currentTab = t.key;
+                        if (State.settings.rememberLastTab) {
+                            GM_setValue('rd_last_tab', t.key);
+                        }
 
                         // Update active class on all tabs
                         tabs.querySelectorAll('.rd-tab').forEach(tb => tb.classList.remove('active'));
@@ -361,6 +389,65 @@
                     if (toast.parentNode) toast.parentNode.removeChild(toast);
                 }, 300);
             }, 3000);
+        },
+
+        showShortcutsModal() {
+            if (document.querySelector('.rd-modal-overlay')) return;
+
+            const formatShortcut = (str) => (str || '').split('+').map((part) => {
+                const p = part.trim().toLowerCase();
+                if (p === 'alt') return 'Alt';
+                if (p === 'ctrl' || p === 'control') return 'Ctrl';
+                if (p === 'shift') return 'Shift';
+                if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
+                return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
+            }).join('+');
+
+            const shortcutRow = (keys, desc) => DOM.create('div', {
+                style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid var(--rd-glass-border);font-size:12px;'
+            }, [
+                DOM.create('span', { textContent: keys, style: 'color:var(--rd-text-primary);font-family:monospace;white-space:nowrap;' }),
+                DOM.create('span', { textContent: desc, style: 'color:var(--rd-text-secondary);text-align:right;' })
+            ]);
+
+            const section = (title, rows) => {
+                const wrap = DOM.create('div', { style: 'margin-bottom:12px;' });
+                wrap.appendChild(DOM.create('div', {
+                    textContent: title,
+                    style: 'font-size:11px;font-weight:bold;color:var(--rd-text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;'
+                }));
+                rows.forEach((row) => wrap.appendChild(row));
+                return wrap;
+            };
+
+            const content = DOM.create('div', { style: 'display:flex;flex-direction:column;' }, [
+                section('General', [
+                    shortcutRow(formatShortcut(State.settings.toggleShortcut), 'Toggle dashboard'),
+                    shortcutRow('Esc', 'Close (modal \u2192 fullscreen \u2192 media \u2192 dashboard)'),
+                    shortcutRow('?', 'Show this help')
+                ]),
+                section('Links', [
+                    shortcutRow('Ctrl+Enter / Cmd+Enter', 'Unrestrict')
+                ]),
+                section('Media player', [
+                    shortcutRow('Space', 'Play / pause'),
+                    shortcutRow('\u2190 / \u2192', 'Seek \u00b110s'),
+                    shortcutRow('\u2191 / \u2193', 'Volume \u00b110%'),
+                    shortcutRow('F', 'Toggle fullscreen'),
+                    shortcutRow('P', 'Picture-in-picture'),
+                    shortcutRow('M', 'Mute'),
+                    shortcutRow('Esc', 'Exit fullscreen or close player')
+                ])
+            ]);
+
+            let modalRef;
+            const closeBtn = DOM.create('button', {
+                className: 'rd-input-btn',
+                textContent: 'Close',
+                style: 'margin:0;',
+                onClick: () => modalRef && modalRef.close()
+            });
+            modalRef = UI.showModal('Keyboard Shortcuts', [content], [closeBtn]);
         },
 
         showModal(title, contentElements, footerElements) {

@@ -12,7 +12,13 @@
             const inputArea = DOM.create('div', { className: 'rd-input-area' });
             const textarea = DOM.create('textarea', {
                 id: 'rd-manual-input', className: 'rd-textarea',
-                placeholder: 'Paste links, folders, magnets, or Base64...'
+                placeholder: 'Paste links, folders, magnets, or Base64...',
+                onKeydown: (e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handleManualInput();
+                    }
+                }
             });
             const btnRow = DOM.create('div', { style: 'display:flex; gap:8px; margin-top:8px;' });
             const unrestrictBtn = DOM.create('button', {
@@ -20,17 +26,47 @@
                 textContent: 'Unrestrict', style: 'flex:2;',
                 onClick: () => handleManualInput()
             });
+            const pasteBtn = DOM.create('button', {
+                id: 'rd-btn-paste', className: 'rd-input-btn',
+                textContent: 'Paste', style: 'flex:1;',
+                onClick: async () => {
+                    try {
+                        const text = await navigator.clipboard.readText();
+                        textarea.value = text;
+                    } catch (e) {
+                        UI.showToast('Clipboard access denied', 'error');
+                    }
+                }
+            });
             const clearBtn = DOM.create('button', {
                 id: 'rd-btn-clear', className: 'rd-input-btn',
                 textContent: 'Clear', style: 'flex:1;',
-                onClick: () => { State.linkHistory = []; GM_setValue('rd_link_history', '[]'); Tabs.Links.render(); UI.showToast('History Cleared'); }
+                onClick: () => {
+                    if (!confirm('Clear all link history?')) return;
+                    State.linkHistory = [];
+                    GM_setValue('rd_link_history', '[]');
+                    Tabs.Links.render();
+                    UI.showToast('History Cleared');
+                }
             });
-            btnRow.append(unrestrictBtn, clearBtn);
+            btnRow.append(unrestrictBtn, pasteBtn, clearBtn);
 
             // Export controls
             const exportRow = DOM.create('div', { style: 'display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:8px;' });
             exportRow.append(buildExportControls('local'));
             exportRow.append(
+                DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Copy All URLs', style: 'margin:0;',
+                    onClick: (e) => {
+                        const urls = State.linkHistory
+                            .filter(h => h.type === 'success')
+                            .map(h => h.download || h.url)
+                            .filter(u => u && u !== '#');
+                        if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
+                        UI.copyToClipboard(urls.join('\n'), e.currentTarget);
+                        UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
+                    }
+                }),
                 DOM.create('button', {
                     className: 'rd-input-btn', textContent: 'Import JSON', style: 'margin:0;',
                     onClick: () => {
@@ -51,19 +87,30 @@
 
             inputArea.append(textarea, btnRow, exportRow);
 
+            const searchInput = DOM.create('input', {
+                type: 'text', id: 'rd-search-links', className: 'rd-search-bar',
+                placeholder: 'Search History...', value: State.linksHistoryFilter || '',
+                style: 'margin:0; margin-top:8px;',
+                onInput: (e) => {
+                    State.linksHistoryFilter = e.target.value;
+                    const logList = document.getElementById('rd-links-history');
+                    if (logList) this._renderHistory(logList, State.linksHistoryFilter);
+                }
+            });
+
             // History list
             const logList = DOM.create('div', { className: 'rd-log-list', id: 'rd-links-history' });
-            this._renderHistory(logList);
+            this._renderHistory(logList, State.linksHistoryFilter);
 
-            area.append(inputArea, logList);
+            area.append(inputArea, searchInput, logList);
         },
 
         refresh() {
             const logList = document.getElementById('rd-links-history');
-            if (logList) this._renderHistory(logList);
+            if (logList) this._renderHistory(logList, State.linksHistoryFilter);
         },
 
-        _renderHistory(container) {
+        _renderHistory(container, filterText) {
             DOM.clear(container);
             if (State.linkHistory.length === 0) {
                 container.append(DOM.create('div', {
@@ -72,10 +119,27 @@
                 }));
                 return;
             }
+
+            let filtered = State.linkHistory;
+            if (filterText) {
+                const lf = filterText.toLowerCase();
+                filtered = State.linkHistory.filter(item => {
+                    const hay = [(item.name || ''), (item.url || ''), (item.msg || '')].join(' ').toLowerCase();
+                    return hay.includes(lf);
+                });
+            }
+
+            if (filtered.length === 0) {
+                container.append(DOM.create('div', {
+                    style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);',
+                    textContent: 'No matching history.'
+                }));
+                return;
+            }
+
             // Render in reverse chronological order
-            for (let i = State.linkHistory.length - 1; i >= 0; i--) {
-                const item = State.linkHistory[i];
-                container.append(this._buildHistoryItem(item));
+            for (let i = filtered.length - 1; i >= 0; i--) {
+                container.append(this._buildHistoryItem(filtered[i]));
             }
         },
 
@@ -750,10 +814,12 @@
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
+                { key: 'rememberLastTab', label: 'Remember Last Tab' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
-                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' }
+                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
+                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));

@@ -2,6 +2,8 @@
     // =========================================================================
 
     const Config = {
+        VERSION: '38.4',
+
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
             'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',
@@ -24,7 +26,9 @@
             exportFormat: 'raw',
             notificationSound: false,
             deepScan: false,
-            toggleShortcut: 'alt+r'
+            dedupeHistory: true,
+            toggleShortcut: 'alt+r',
+            rememberLastTab: true
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),

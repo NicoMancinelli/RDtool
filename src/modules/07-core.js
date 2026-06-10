@@ -2,6 +2,16 @@
 
     function addToHistory(item) {
         item.time = item.time || new Date().toLocaleTimeString();
+        if (State.settings.dedupeHistory && item.type === 'success') {
+            const urlKey = item.download || item.url;
+            if (urlKey && urlKey !== '#') {
+                State.linkHistory = State.linkHistory.filter(h => {
+                    if (h.type !== 'success') return true;
+                    const existing = h.download || h.url;
+                    return !existing || existing === '#' || existing !== urlKey;
+                });
+            }
+        }
         State.linkHistory.push(item);
         if (State.linkHistory.length > 500) State.linkHistory = State.linkHistory.slice(-500);
         GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
