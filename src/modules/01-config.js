@@ -2,7 +2,7 @@
     // =========================================================================
 
     const Config = {
-        VERSION: '38.5',
+        VERSION: '38.6',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -30,6 +30,7 @@
             dedupeHistory: true,
             toggleShortcut: 'alt+r',
             rememberLastTab: true,
+            rememberDashboardOpen: false,
             switchToTorrentsOnMagnet: false,
             openDashboardOnMagnet: false
         },

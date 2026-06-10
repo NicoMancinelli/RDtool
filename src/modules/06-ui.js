@@ -7,6 +7,17 @@
         return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
     }
 
+    function formatShortcut(str) {
+        return (str || '').split('+').map((part) => {
+            const p = part.trim().toLowerCase();
+            if (p === 'alt') return 'Alt';
+            if (p === 'ctrl' || p === 'control') return 'Ctrl';
+            if (p === 'shift') return 'Shift';
+            if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
+            return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
+        }).join('+');
+    }
+
     const UI = {
         init() {
             // Main container
@@ -29,6 +40,9 @@
                 UI.renderSetup();
             } else {
                 UI.renderFAB();
+                if (State.settings.rememberDashboardOpen && GM_getValue('rd_dashboard_open', false)) {
+                    UI.toggleDashboard(true);
+                }
             }
 
             // --- Step 3: Event delegation ---
@@ -133,7 +147,11 @@
                 id: 'rd-fab-queue-badge',
                 textContent: ''
             });
-            const fab = DOM.create('div', { className: fabClass, style: 'position:relative;' }, [
+            const fabAttrs = { className: fabClass, style: 'position:relative;' };
+            if (!State.isMobile) {
+                fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
+            }
+            const fab = DOM.create('div', fabAttrs, [
                 DOM.create('span', { htmlContent: LIGHTNING_SVG }),
                 badge,
                 queueBadge
@@ -206,6 +224,7 @@
 
             if (show) {
                 State.isExpanded = true;
+                if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
                     const lastTab = GM_getValue('rd_last_tab', 'links');
                     if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
@@ -226,6 +245,7 @@
                 }
             } else {
                 State.isExpanded = false;
+                if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', false);
                 container.className = '';
                 container.style.cssText = '';
 
@@ -393,15 +413,6 @@
 
         showShortcutsModal() {
             if (document.querySelector('.rd-modal-overlay')) return;
-
-            const formatShortcut = (str) => (str || '').split('+').map((part) => {
-                const p = part.trim().toLowerCase();
-                if (p === 'alt') return 'Alt';
-                if (p === 'ctrl' || p === 'control') return 'Ctrl';
-                if (p === 'shift') return 'Shift';
-                if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
-                return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
-            }).join('+');
 
             const shortcutRow = (keys, desc) => DOM.create('div', {
                 style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid var(--rd-glass-border);font-size:12px;'

@@ -4,6 +4,18 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.6] - 2026-06-10
+
+### Added
+
+- FAB hover tooltip on desktop — shows `RD Suite (Alt+R)` using the configured toggle shortcut
+- Remember Dashboard Open setting (default off) — persists dashboard open/closed state across page loads
+- Copy URLs button on Page, Torrents, and Cloud tabs — copies newline-separated URLs from checked items only with count toast (Page: host URLs; Torrents: completed download links; Cloud: `item.download`)
+
+### Changed
+
+- Build reads `Config.VERSION` from `01-config.js` as single source of truth; syncs `@version` in userscript header and `package.json` on `npm run build`
+
 ## [38.5] - 2026-06-10
 
 ### Added

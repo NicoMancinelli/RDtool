@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.5
+// @version      38.6
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,7 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.5',
+        VERSION: '38.6',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -843,6 +843,7 @@ GM_addStyle(`:root {
             dedupeHistory: true,
             toggleShortcut: 'alt+r',
             rememberLastTab: true,
+            rememberDashboardOpen: false,
             switchToTorrentsOnMagnet: false,
             openDashboardOnMagnet: false
         },
@@ -1297,6 +1298,17 @@ GM_addStyle(`:root {
         return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
     }
 
+    function formatShortcut(str) {
+        return (str || '').split('+').map((part) => {
+            const p = part.trim().toLowerCase();
+            if (p === 'alt') return 'Alt';
+            if (p === 'ctrl' || p === 'control') return 'Ctrl';
+            if (p === 'shift') return 'Shift';
+            if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
+            return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
+        }).join('+');
+    }
+
     const UI = {
         init() {
             // Main container
@@ -1319,6 +1331,9 @@ GM_addStyle(`:root {
                 UI.renderSetup();
             } else {
                 UI.renderFAB();
+                if (State.settings.rememberDashboardOpen && GM_getValue('rd_dashboard_open', false)) {
+                    UI.toggleDashboard(true);
+                }
             }
 
             // --- Step 3: Event delegation ---
@@ -1423,7 +1438,11 @@ GM_addStyle(`:root {
                 id: 'rd-fab-queue-badge',
                 textContent: ''
             });
-            const fab = DOM.create('div', { className: fabClass, style: 'position:relative;' }, [
+            const fabAttrs = { className: fabClass, style: 'position:relative;' };
+            if (!State.isMobile) {
+                fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
+            }
+            const fab = DOM.create('div', fabAttrs, [
                 DOM.create('span', { htmlContent: LIGHTNING_SVG }),
                 badge,
                 queueBadge
@@ -1496,6 +1515,7 @@ GM_addStyle(`:root {
 
             if (show) {
                 State.isExpanded = true;
+                if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
                     const lastTab = GM_getValue('rd_last_tab', 'links');
                     if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
@@ -1516,6 +1536,7 @@ GM_addStyle(`:root {
                 }
             } else {
                 State.isExpanded = false;
+                if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', false);
                 container.className = '';
                 container.style.cssText = '';
 
@@ -1683,15 +1704,6 @@ GM_addStyle(`:root {
 
         showShortcutsModal() {
             if (document.querySelector('.rd-modal-overlay')) return;
-
-            const formatShortcut = (str) => (str || '').split('+').map((part) => {
-                const p = part.trim().toLowerCase();
-                if (p === 'alt') return 'Alt';
-                if (p === 'ctrl' || p === 'control') return 'Ctrl';
-                if (p === 'shift') return 'Shift';
-                if (p === 'meta' || p === 'cmd' || p === 'command') return 'Cmd';
-                return p.length === 1 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1);
-            }).join('+');
 
             const shortcutRow = (keys, desc) => DOM.create('div', {
                 style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid var(--rd-glass-border);font-size:12px;'
@@ -2507,6 +2519,18 @@ GM_addStyle(`:root {
         }
     };
 
+    function makeCopyUrlsBtn(getUrls) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
+            onClick: (e) => {
+                const urls = getUrls();
+                if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
+                UI.copyToClipboard(urls.join('\n'), e.currentTarget);
+                UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
+            }
+        });
+    }
+
     function buildExportControls(scope) {
         const wrapper = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center;' });
         const select = DOM.create('select', { id: 'rd-export-format-' + scope, className: 'rd-select', style: 'padding:5px 8px;' });
@@ -2604,7 +2628,14 @@ GM_addStyle(`:root {
                 }
             });
 
-            leftGroup.append(selectAllLabel, selectUncachedBtn, dlSelBtn, queueBtn, queueStatus);
+            leftGroup.append(
+                selectAllLabel,
+                selectUncachedBtn,
+                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value).filter(u => u)),
+                dlSelBtn,
+                queueBtn,
+                queueStatus
+            );
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -2723,7 +2754,20 @@ GM_addStyle(`:root {
                     }
                 }
             });
-            leftGroup.append(selectAllLabel, delSelBtn);
+            leftGroup.append(
+                selectAllLabel,
+                makeCopyUrlsBtn(() => {
+                    const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
+                    const urls = [];
+                    for (const t of State.cachedTorrents) {
+                        if (!selIds.has(String(t.id))) continue;
+                        if (t.status !== 'downloaded' || !t.links?.length) continue;
+                        t.links.forEach(u => { if (u && u !== '#') urls.push(u); });
+                    }
+                    return urls;
+                }),
+                delSelBtn
+            );
 
             const cleanBtn = DOM.create('button', {
                 className: 'rd-input-btn', textContent: 'Clean Dead', style: 'margin:0;',
@@ -2954,7 +2998,11 @@ GM_addStyle(`:root {
                     }
                 }
             });
-            leftGroup.append(selectAllLabel, delSelBtn);
+            leftGroup.append(
+                selectAllLabel,
+                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
+                delSelBtn
+            );
             topRow.append(leftGroup, buildExportControls('cloud'));
 
             const bottomRow = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
@@ -3160,6 +3208,7 @@ GM_addStyle(`:root {
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
+                { key: 'rememberDashboardOpen', label: 'Remember Dashboard Open', desc: 'Restore dashboard open/closed state across page loads' },
                 { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
                 { key: 'openDashboardOnMagnet', label: 'Open Dashboard on Page Magnet', desc: 'Show dashboard when adding a magnet via the inline page icon' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },

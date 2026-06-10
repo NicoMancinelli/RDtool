@@ -210,6 +210,18 @@
         }
     };
 
+    function makeCopyUrlsBtn(getUrls) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
+            onClick: (e) => {
+                const urls = getUrls();
+                if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
+                UI.copyToClipboard(urls.join('\n'), e.currentTarget);
+                UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
+            }
+        });
+    }
+
     function buildExportControls(scope) {
         const wrapper = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center;' });
         const select = DOM.create('select', { id: 'rd-export-format-' + scope, className: 'rd-select', style: 'padding:5px 8px;' });
@@ -307,7 +319,14 @@
                 }
             });
 
-            leftGroup.append(selectAllLabel, selectUncachedBtn, dlSelBtn, queueBtn, queueStatus);
+            leftGroup.append(
+                selectAllLabel,
+                selectUncachedBtn,
+                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value).filter(u => u)),
+                dlSelBtn,
+                queueBtn,
+                queueStatus
+            );
             controlBar.append(leftGroup, buildExportControls('page'));
 
             // Group links by domain
@@ -426,7 +445,20 @@
                     }
                 }
             });
-            leftGroup.append(selectAllLabel, delSelBtn);
+            leftGroup.append(
+                selectAllLabel,
+                makeCopyUrlsBtn(() => {
+                    const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
+                    const urls = [];
+                    for (const t of State.cachedTorrents) {
+                        if (!selIds.has(String(t.id))) continue;
+                        if (t.status !== 'downloaded' || !t.links?.length) continue;
+                        t.links.forEach(u => { if (u && u !== '#') urls.push(u); });
+                    }
+                    return urls;
+                }),
+                delSelBtn
+            );
 
             const cleanBtn = DOM.create('button', {
                 className: 'rd-input-btn', textContent: 'Clean Dead', style: 'margin:0;',
@@ -657,7 +689,11 @@
                     }
                 }
             });
-            leftGroup.append(selectAllLabel, delSelBtn);
+            leftGroup.append(
+                selectAllLabel,
+                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
+                delSelBtn
+            );
             topRow.append(leftGroup, buildExportControls('cloud'));
 
             const bottomRow = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
@@ -863,6 +899,7 @@
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
                 { key: 'autoShow', label: 'Auto-Show Dashboard' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
+                { key: 'rememberDashboardOpen', label: 'Remember Dashboard Open', desc: 'Restore dashboard open/closed state across page loads' },
                 { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
                 { key: 'openDashboardOnMagnet', label: 'Open Dashboard on Page Magnet', desc: 'Show dashboard when adding a magnet via the inline page icon' },
                 { key: 'autoCleanup', label: 'Auto-Clean Dead Torrents' },

@@ -44,6 +44,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Queue adds items to processing
 - [ ] 1-Click on individual link unrestricts
 - [ ] Select Uncached checks only non-cached links
+- [ ] Copy URLs copies checked host URLs with count toast
 
 ## Magnets & Torrent Modal (critical path)
 
@@ -62,6 +63,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Clean Dead removes error/dead torrents
 - [ ] Search filters list
 - [ ] Pull-to-refresh on mobile reloads list
+- [ ] Copy URLs copies checked completed download links with count toast; error toast when none available
 
 ## Cloud Tab
 
@@ -71,6 +73,7 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Delete selected removes cloud items
 - [ ] Offline fallback shows cached data with toast
 - [ ] Pull-to-refresh on mobile reloads cloud
+- [ ] Copy URLs copies checked `item.download` URLs with count toast
 
 ## Settings Tab
 
