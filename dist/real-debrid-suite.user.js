@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.9
+// @version      40.0
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,8 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.9',
+        VERSION: '40.0',
+        SETTINGS_VERSION: 2,
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -851,7 +852,8 @@ GM_addStyle(`:root {
             cloudLimit: '100',
             useUnrestrictCache: true,
             apiRateLimit: '4',
-            maxLinksPerScan: '150'
+            maxLinksPerScan: '150',
+            useApiHostRegex: true
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -877,18 +879,22 @@ GM_addStyle(`:root {
         },
 
         getActiveRegex() {
+            if (State.settings.useApiHostRegex && State.apiHostRegex) {
+                try {
+                    return new RegExp(State.apiHostRegex, 'i');
+                } catch (e) { /* fall through */ }
+            }
+
             const allHosts = [...this.BASE_HOSTS];
 
-            // Add dynamic hosts
             if (State.dynamicHosts && State.dynamicHosts.length) {
-                State.dynamicHosts.forEach(h => {
+                State.dynamicHosts.forEach((h) => {
                     allHosts.push(h.replace(/\./g, '\\.'));
                 });
             }
 
-            // Add custom hosts from settings
             if (State.settings && State.settings.customHosts) {
-                State.settings.customHosts.split(',').map(h => h.trim()).filter(Boolean).forEach(h => {
+                State.settings.customHosts.split(',').map((h) => h.trim()).filter(Boolean).forEach((h) => {
                     allHosts.push(h.replace(/\./g, '\\.'));
                 });
             }
@@ -966,7 +972,14 @@ GM_addStyle(`:root {
         unrestrictCache: new Map(),
         linkCheckCache: new Map(),
         pageCollapsedDomains: new Set(),
-        torrentStatusFilter: 'all'
+        torrentStatusFilter: 'all',
+        pageLinkCache: new Map(),
+        cloudPage: 1,
+        cloudHasMore: false,
+        activeTorrentCount: null,
+        apiHostRegex: null,
+        apiHostRegexFolder: null,
+        trafficDetails: null
     };
 
     // =========================================================================
@@ -978,10 +991,7 @@ GM_addStyle(`:root {
 
     // Validate and load settings
     const savedSettings = JSON.parse(GM_getValue('rd_settings', '{}'));
-    State.settings = {};
-    for (const key of Object.keys(Config.defaultSettings)) {
-        State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
-    }
+    State.settings = migrateSettings(savedSettings);
 
     if (State.settings.rememberLastTab) {
         const lastTab = GM_getValue('rd_last_tab', 'links');
@@ -1010,7 +1020,62 @@ GM_addStyle(`:root {
 // Utility Functions
     // =========================================================================
 
-    function saveSettings() { GM_setValue('rd_settings', JSON.stringify(State.settings)); }
+    function saveSettings() {
+        State.settings._settingsVersion = Config.SETTINGS_VERSION;
+        GM_setValue('rd_settings', JSON.stringify(State.settings));
+    }
+
+    function migrateSettings(raw) {
+        const settings = {};
+        for (const key of Object.keys(Config.defaultSettings)) {
+            settings[key] = raw && Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : Config.defaultSettings[key];
+        }
+        return settings;
+    }
+
+    function isBrowserNativeMedia(filename, url) {
+        const name = filename || url || '';
+        return /\.(mp4|webm|mov|mp3|flac|wav|ogg|jpg|jpeg|png|webp|gif)(\?|$)/i.test(name);
+    }
+
+    function extractRdLinkId(url, downloadId) {
+        if (downloadId) return String(downloadId);
+        if (!url) return null;
+        const m = url.match(/real-debrid\.com\/d\/([A-Z0-9]+)/i) || url.match(/\/d\/([A-Z0-9]+)/i);
+        return m ? m[1] : null;
+    }
+
+    async function resolvePlayableUrl(url, filename, downloadId) {
+        if (State.settings.extPlayer !== 'browser') {
+            return { url: getStreamUrl(url), mode: 'external' };
+        }
+        if (isBrowserNativeMedia(filename, url)) {
+            return { url, mode: 'direct' };
+        }
+        const id = extractRdLinkId(url, downloadId);
+        if (!id) return { url, mode: 'direct' };
+        const res = await API.getStreamingTranscode(id);
+        if (res.ok && res.data && typeof res.data === 'object') {
+            const streamUrl = res.data.mp4 || res.data.apple || res.data.dash ||
+                Object.values(res.data).find((v) => typeof v === 'string' && v.startsWith('http'));
+            if (streamUrl) return { url: streamUrl, mode: 'transcode' };
+        }
+        if (State.settings.extPlayer !== 'browser') {
+            return { url: getStreamUrl(url), mode: 'external' };
+        }
+        return { url, mode: 'direct' };
+    }
+
+    async function playMediaUrl(url, filename, downloadId, playlist) {
+        const resolved = await resolvePlayableUrl(url, filename, downloadId);
+        if (resolved.mode === 'external') {
+            window.open(resolved.url, '_self');
+            return;
+        }
+        if (typeof Media !== 'undefined') {
+            Media.open(resolved.url, filename, playlist, resolved.mode);
+        }
+    }
 
     function formatRelativeTime(ts) {
         if (!ts) return '';
@@ -1096,7 +1161,7 @@ GM_addStyle(`:root {
                 const headers = { 'Authorization': 'Bearer ' + State.apiKey };
                 let body = undefined;
 
-                if (method === 'POST' && data) {
+                if ((method === 'POST' || method === 'PUT') && data) {
                     headers['Content-Type'] = 'application/x-www-form-urlencoded';
                     body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
                 }
@@ -1166,7 +1231,71 @@ GM_addStyle(`:root {
             return this.request('DELETE', endpoint);
         },
 
-        upload(endpoint, file) {
+        put(endpoint, data) {
+            return this.request('PUT', endpoint, data);
+        },
+
+        _torrentHostCache: null,
+
+        async resolveTorrentHost() {
+            if (this._torrentHostCache) return this._torrentHostCache;
+            const res = await this.getTorrentsAvailableHosts();
+            if (res.ok && res.data) {
+                const hosts = Object.keys(res.data);
+                this._torrentHostCache = hosts[0] || '';
+            } else {
+                this._torrentHostCache = '';
+            }
+            return this._torrentHostCache;
+        },
+
+        getStreamingTranscode(id) {
+            return this.get('/streaming/transcode/' + id);
+        },
+
+        getStreamingMediaInfos(id) {
+            return this.get('/streaming/mediaInfos/' + id);
+        },
+
+        getHostsRegex() {
+            return this.get('/hosts/regex');
+        },
+
+        getHostsRegexFolder() {
+            return this.get('/hosts/regexFolder');
+        },
+
+        getTorrentsActiveCount() {
+            return this.get('/torrents/activeCount');
+        },
+
+        getTorrentsAvailableHosts() {
+            return this.get('/torrents/availableHosts');
+        },
+
+        deleteAllDownloads() {
+            return this.del('/downloads/deleteAll');
+        },
+
+        deleteAllTorrents() {
+            return this.del('/torrents/deleteAll');
+        },
+
+        getDownloadsPage(limit, page) {
+            const l = limit || 100;
+            const p = page || 1;
+            return this.get('/downloads?limit=' + l + '&page=' + p);
+        },
+
+        renameDownload(id, newFilename) {
+            return this.put('/downloads/rename/' + id, { newFilename: newFilename });
+        },
+
+        getTrafficDetails() {
+            return this.get('/traffic/details');
+        },
+
+        upload(endpoint, file, _retried) {
             if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
 
             return this._enqueue(() => new Promise((resolve) => {
@@ -1206,6 +1335,19 @@ GM_addStyle(`:root {
                             if (status === 401 || status === 403) {
                                 Config.clearKey();
                                 return resolve({ ok: false, error: 'Auth Error' });
+                            }
+
+                            if (status === 429 && !_retried) {
+                                const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
+                                return setTimeout(() => {
+                                    this.upload(endpoint, file, true).then(resolve);
+                                }, retryAfter * 1000);
+                            }
+
+                            if (status === 503 && !_retried) {
+                                return setTimeout(() => {
+                                    this.upload(endpoint, file, true).then(resolve);
+                                }, 2000);
                             }
 
                             if (status >= 400) {
@@ -1299,6 +1441,86 @@ GM_addStyle(`:root {
     // =========================================================================
     // UI Shell — Styles + FAB + Dashboard Frame + Toasts + Modals
     // =========================================================================
+
+
+// List Renderer — incremental DOM patching for list tabs
+    // =========================================================================
+
+    const ListRenderer = {
+        patch(container, items, options) {
+            if (!container) return;
+            const keyFn = options.key || ((item) => item.id);
+            const renderFn = options.render;
+            const compareFn = options.compare || ((a, b) => JSON.stringify(a) === JSON.stringify(b));
+            const emptyMessage = options.emptyMessage || 'No items.';
+
+            if (!items.length) {
+                container.innerHTML = '';
+                container.append(DOM.create('div', {
+                    style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);',
+                    textContent: emptyMessage
+                }));
+                return;
+            }
+
+            const emptyEl = container.querySelector('[data-list-empty]');
+            if (emptyEl) emptyEl.remove();
+
+            const existing = new Map();
+            container.querySelectorAll('[data-list-key]').forEach((el) => {
+                existing.set(el.dataset.listKey, el);
+            });
+
+            const newKeySet = new Set(items.map((item) => String(keyFn(item))));
+            for (const [k, el] of existing) {
+                if (!newKeySet.has(k)) el.remove();
+            }
+
+            let prev = null;
+            for (const item of items) {
+                const k = String(keyFn(item));
+                let el = container.querySelector('[data-list-key="' + k + '"]');
+                const prevData = el && el._listData;
+
+                if (!el) {
+                    el = renderFn(item);
+                    el.dataset.listKey = k;
+                    el._listData = item;
+                    if (prev) {
+                        if (prev.nextSibling !== el) container.insertBefore(el, prev.nextSibling);
+                    } else {
+                        container.insertBefore(el, container.firstChild);
+                    }
+                } else if (!prevData || !compareFn(item, prevData)) {
+                    const oldChk = el.querySelector('input[type="checkbox"]');
+                    const wasChecked = oldChk ? oldChk.checked : false;
+                    const newEl = renderFn(item);
+                    newEl.dataset.listKey = k;
+                    newEl._listData = item;
+                    const newChk = newEl.querySelector('input[type="checkbox"]');
+                    if (newChk && wasChecked) newChk.checked = true;
+                    el.replaceWith(newEl);
+                    el = newEl;
+                }
+
+                if (prev && el.previousElementSibling !== prev) {
+                    container.insertBefore(el, prev.nextSibling);
+                }
+                prev = el;
+            }
+        },
+
+        torrentCompare(a, b) {
+            return a.id === b.id && a.status === b.status && a.progress === b.progress &&
+                a.speed === b.speed && a.bytes === b.bytes && a.filename === b.filename &&
+                JSON.stringify(a.links) === JSON.stringify(b.links);
+        },
+
+        cloudCompare(a, b) {
+            return a.id === b.id && a.filename === b.filename && a.filesize === b.filesize &&
+                a.download === b.download && a.generated === b.generated;
+        }
+    };
 
 
 // --- Step 2: UI Module ---
@@ -1416,13 +1638,7 @@ GM_addStyle(`:root {
                 if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
                     for (const file of e.dataTransfer.files) {
                         if (file.name.endsWith('.torrent')) {
-                            API.upload('/torrents/addTorrent', file).then(res => {
-                                if (res.ok) {
-                                    UI.showToast('Torrent uploaded: ' + file.name);
-                                } else {
-                                    UI.showToast('Upload failed: ' + (res.error || 'Unknown'), 'error');
-                                }
-                            });
+                            uploadTorrentFile(file);
                         }
                     }
                     return;
@@ -1499,13 +1715,21 @@ GM_addStyle(`:root {
                     className: 'rd-input-btn primary',
                     textContent: 'Save Key',
                     style: 'padding:10px;font-size:13px;',
-                    onClick: () => {
+                    onClick: async () => {
                         const key = input.value.trim();
                         if (key.length < 5) {
                             UI.showToast('Key too short', 'error');
                             return;
                         }
+                        const prevKey = State.apiKey;
                         Config.saveKey(key);
+                        const userRes = await API.get('/user');
+                        if (!userRes.ok) {
+                            Config.clearKey();
+                            if (prevKey) Config.saveKey(prevKey);
+                            UI.showToast('Invalid API key — check and try again', 'error');
+                            return;
+                        }
                         UI.showToast('API key saved! Reloading...');
                         setTimeout(() => location.reload(), 800);
                     }
@@ -1620,6 +1844,11 @@ GM_addStyle(`:root {
                         id: 'rd-session-counter'
                     }),
                     DOM.create('span', {
+                        id: 'rd-header-quota',
+                        style: 'font-size:9px;color:var(--rd-accent);background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;border:1px solid var(--rd-glass-border);',
+                        textContent: ''
+                    }),
+                    DOM.create('span', {
                         id: 'rd-queue-progress',
                         className: 'rd-queue-status',
                         style: State.queueProcessing ? '' : 'display:none;',
@@ -1688,7 +1917,9 @@ GM_addStyle(`:root {
             container.appendChild(tabs);
             container.appendChild(contentArea);
 
-            // Render current tab content
+            UI.fetchAccountSummary();
+            UI.updateHeaderQuota();
+
             const capKey = State.currentTab.charAt(0).toUpperCase() + State.currentTab.slice(1);
             if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
@@ -1698,6 +1929,41 @@ GM_addStyle(`:root {
                     textContent: 'Tab "' + capKey + '" not loaded yet.'
                 }));
             }
+        },
+
+        async fetchAccountSummary() {
+            if (!State.apiKey) return;
+            const userRes = await API.get('/user');
+            if (userRes.ok) State.userProfile = userRes.data;
+            const trafficRes = await API.get('/traffic');
+            if (trafficRes.ok) State.trafficData = trafficRes.data;
+            const countRes = await API.getTorrentsActiveCount();
+            if (countRes.ok && typeof countRes.data === 'number') State.activeTorrentCount = countRes.data;
+            UI.updateHeaderQuota();
+        },
+
+        updateHeaderQuota() {
+            const el = document.getElementById('rd-header-quota');
+            if (!el) return;
+            const parts = [];
+            if (State.userProfile && State.userProfile.expiration) {
+                const daysLeft = Math.max(0, Math.ceil((new Date(State.userProfile.expiration) - new Date()) / 86400000));
+                parts.push(daysLeft + 'd left');
+            }
+            if (State.trafficData) {
+                const quotas = Object.entries(State.trafficData).filter(([, d]) => d.limit && d.limit > 0);
+                if (quotas.length) {
+                    const [, d] = quotas[0];
+                    const pct = Math.round(((d.limit - d.left) / d.limit) * 100);
+                    parts.push('Quota ' + pct + '%');
+                    if (pct >= 90) UI.showToast('Daily quota almost exhausted', 'error');
+                }
+            }
+            if (typeof State.activeTorrentCount === 'number') {
+                parts.push(State.activeTorrentCount + ' active');
+            }
+            el.textContent = parts.join(' · ');
+            el.style.display = parts.length ? '' : 'none';
         },
 
         showToast(msg, type = 'info') {
@@ -1920,10 +2186,7 @@ GM_addStyle(`:root {
                 url: cached.url, download: cached.url,
                 size: cached.size
             });
-            if (!silent) {
-                if (State.settings.defaultAction === 'dl') window.open(cached.url, '_blank');
-                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(cached.url);
-            }
+            if (!silent) applyDefaultAction(cached.url);
             return cached.url;
         }
 
@@ -1944,11 +2207,13 @@ GM_addStyle(`:root {
             url: dlUrl, download: dlUrl,
             size: entry.size
         });
-        if (!silent) {
-            if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
-            else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(dlUrl);
-        }
+        if (!silent) applyDefaultAction(dlUrl);
         return dlUrl;
+    }
+
+    function applyDefaultAction(url) {
+        if (State.settings.defaultAction === 'dl') window.open(url, '_blank');
+        else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(url);
     }
 
     async function unrestrictLinkOrFolder(url, silent = false, filter = null, callback = null) {
@@ -1960,10 +2225,7 @@ GM_addStyle(`:root {
                 url: dlUrl, download: dlUrl,
                 size: formatBytes(data.filesize)
             });
-            if (!silent) {
-                if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
-                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(dlUrl);
-            }
+            if (!silent) applyDefaultAction(dlUrl);
             if (callback) callback(dlUrl);
             return dlUrl;
         }
@@ -2067,7 +2329,9 @@ GM_addStyle(`:root {
 
     async function addMagnet(magnet, callback = null) {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
-        const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
+        const host = await API.resolveTorrentHost();
+        const endpoint = host ? '/torrents/addMagnet?host=' + encodeURIComponent(host) : '/torrents/addMagnet';
+        const { ok, data, error } = await API.post(endpoint, { magnet: magnet });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
             return;
@@ -2097,106 +2361,66 @@ GM_addStyle(`:root {
         const files = infoRes.data.files;
         const title = infoRes.data.filename || 'Torrent';
 
-        if (State.settings.magnetAction === 'manual') {
-            showTorrentSelectorModal(torrentId, files, title, callback);
-            return;
-        }
-
-        if (State.settings.magnetAction === 'video') {
-            const videoExts = /\.(mp4|mkv|avi|mov|webm)$/i;
-            let largestId = null, maxSize = 0;
-            files.forEach(f => {
-                if (videoExts.test(f.path) && f.bytes > maxSize) { maxSize = f.bytes; largestId = f.id; }
-            });
-            if (largestId) {
-                await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
-                addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
-                if (!State.queueProcessing) UI.showToast('Main Video Added!');
-                finishMagnetAdd(callback);
-            } else {
-                // No video found — fallback to manual
-                showTorrentSelectorModal(torrentId, files, title, callback);
-            }
-            return;
-        }
-
-        // Smart mode (default)
-        let fileIds = 'all';
-        if (State.settings.smartFilter) {
-            const exts = State.settings.filterExts.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
-            if (exts.length > 0) {
-                const extRegex = new RegExp('\\.(' + exts.join('|') + ')$', 'i');
-                const validFiles = files.filter(f => !extRegex.test(f.path));
-                if (validFiles.length > 0) fileIds = validFiles.map(f => f.id).join(',');
-            }
-        }
-        await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
-        addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-        if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-        finishMagnetAdd(callback);
+        await TorrentPicker.open(torrentId, callback, files, title);
     }
 
-    // --- Torrent file selector modal ---
+    async function playTorrentVideos(torrent) {
+        if (!torrent.links || !torrent.links.length) {
+            UI.showToast('No files ready to play', 'error');
+            return;
+        }
+        const videoExts = /\.(mp4|mkv|avi|mov|webm|mp3|flac|wav)$/i;
+        const mediaLinks = torrent.links.filter((u) => videoExts.test(u));
+        if (!mediaLinks.length) {
+            UI.showToast('No playable media in torrent', 'error');
+            return;
+        }
+        UI.showToast('Preparing playlist...');
+        const playlist = [];
+        for (const link of mediaLinks) {
+            const name = link.split('/').pop() || torrent.filename;
+            const resolved = await resolvePlayableUrl(link, name);
+            playlist.push({ url: resolved.url, filename: name, mode: resolved.mode });
+        }
+        if (playlist.length && typeof Media !== 'undefined') {
+            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode);
+        }
+    }
 
-    function showTorrentSelectorModal(torrentId, files, title, callback) {
-        const container = DOM.create('div', { style: 'display:flex;flex-direction:column;gap:10px;max-height:60vh;' });
+    async function deleteAllCloudItems() {
+        const { ok, error } = await API.deleteAllDownloads();
+        if (ok) {
+            State.cachedCloud = [];
+            GM_setValue('rd_cached_cloud', '[]');
+            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.render();
+            UI.showToast('All cloud items deleted');
+        } else {
+            UI.showToast('Delete failed: ' + error, 'error');
+        }
+    }
 
-        const headerRow = DOM.create('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px;' });
-        const selectAllBtn = DOM.create('button', { textContent: 'Select All', className: 'rd-input-btn' });
-        const selectNoneBtn = DOM.create('button', { textContent: 'Select None', className: 'rd-input-btn' });
-        headerRow.append(selectAllBtn, selectNoneBtn);
-        container.append(headerRow);
+    async function deleteAllTorrentItems() {
+        const { ok, error } = await API.deleteAllTorrents();
+        if (ok) {
+            State.cachedTorrents = [];
+            GM_setValue('rd_cached_torrents', '[]');
+            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
+            UI.showToast('All torrents deleted');
+        } else {
+            UI.showToast('Delete failed: ' + error, 'error');
+        }
+    }
 
-        const fileList = DOM.create('div', { style: 'overflow-y:auto;max-height:50vh;display:flex;flex-direction:column;gap:4px;' });
-        const checkboxes = [];
-
-        files.forEach(f => {
-            const row = DOM.create('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--rd-radius-xs);cursor:pointer;font-size:13px;' });
-            const cb = DOM.create('input', { type: 'checkbox', checked: true, style: 'flex-shrink:0;' });
-            cb.dataset.fileId = f.id;
-            checkboxes.push(cb);
-
-            const parts = f.path.split('/');
-            const fileName = parts.pop();
-            const folderPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
-
-            const label = DOM.create('span');
-            if (folderPrefix) label.append(DOM.create('span', { textContent: folderPrefix, style: 'opacity:0.5;' }));
-            label.append(DOM.create('span', { textContent: fileName, style: 'font-weight:bold;' }));
-
-            row.append(cb, label, DOM.create('span', {
-                textContent: formatBytes(f.bytes),
-                style: 'margin-left:auto;opacity:0.6;font-size:12px;white-space:nowrap;'
-            }));
-            fileList.append(row);
-        });
-
-        container.append(fileList);
-
-        selectAllBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = true; }));
-        selectNoneBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = false; }));
-
-        const cancelBtn = DOM.create('button', { textContent: 'Cancel', className: 'rd-input-btn' });
-        const startBtn = DOM.create('button', { textContent: 'Start Download', className: 'rd-input-btn primary' });
-        const modal = UI.showModal(title, [container], [cancelBtn, startBtn]);
-
-        cancelBtn.addEventListener('click', () => {
-            modal.close();
-            API.del('/torrents/delete/' + torrentId);
-        });
-
-        startBtn.addEventListener('click', async () => {
-            const selectedIds = checkboxes.filter(cb => cb.checked).map(cb => cb.dataset.fileId);
-            if (selectedIds.length === 0) {
-                UI.showToast('Select at least one file', 'error');
-                return;
-            }
-            await API.post('/torrents/selectFiles/' + torrentId, { files: selectedIds.join(',') });
-            addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
-            UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
-            modal.close();
-            finishMagnetAdd(callback);
-        });
+    async function renameCloudItem(id, newName) {
+        const { ok, error } = await API.renameDownload(id, newName);
+        if (ok) {
+            const item = State.cachedCloud.find((c) => c.id === id);
+            if (item) item.filename = newName;
+            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            UI.showToast('Renamed');
+        } else {
+            UI.showToast('Rename failed: ' + error, 'error');
+        }
     }
 
     // --- Queue processing with parallel concurrency ---
@@ -2366,9 +2590,258 @@ GM_addStyle(`:root {
     }
 
 
+// Torrent file picker — shared modal for magnets, uploads, and pending torrents
+    // =========================================================================
+
+    const TorrentPicker = {
+        async open(torrentId, callback, preloadedFiles, preloadedTitle) {
+            let files = preloadedFiles;
+            let title = preloadedTitle || 'Select Files';
+
+            if (!files) {
+                const infoRes = await API.get('/torrents/info/' + torrentId);
+                if (!infoRes.ok || !infoRes.data || !infoRes.data.files) {
+                    UI.showToast('Could not load torrent files', 'error');
+                    return;
+                }
+                files = infoRes.data.files;
+                title = infoRes.data.filename || title;
+            }
+
+            if (State.settings.magnetAction !== 'manual' && State.settings.magnetAction !== 'video' && State.settings.magnetAction !== 'smart') {
+                this._showModal(torrentId, files, title, callback);
+                return;
+            }
+
+            if (State.settings.magnetAction === 'manual') {
+                this._showModal(torrentId, files, title, callback);
+                return;
+            }
+
+            if (State.settings.magnetAction === 'video') {
+                const videoExts = /\.(mp4|mkv|avi|mov|webm)$/i;
+                let largestId = null, maxSize = 0;
+                files.forEach((f) => {
+                    if (videoExts.test(f.path) && f.bytes > maxSize) { maxSize = f.bytes; largestId = f.id; }
+                });
+                if (largestId) {
+                    await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
+                    addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
+                    if (!State.queueProcessing) UI.showToast('Main Video Added!');
+                    finishMagnetAdd(callback);
+                    return;
+                }
+            }
+
+            if (State.settings.magnetAction === 'smart' || State.settings.magnetAction === 'video') {
+                let fileIds = 'all';
+                if (State.settings.smartFilter) {
+                    const exts = State.settings.filterExts.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+                    if (exts.length > 0) {
+                        const extRegex = new RegExp('\\.(' + exts.join('|') + ')$', 'i');
+                        const validFiles = files.filter((f) => !extRegex.test(f.path));
+                        if (validFiles.length > 0) fileIds = validFiles.map((f) => f.id).join(',');
+                    }
+                }
+                await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
+                addToHistory({ type: 'success', name: title, url: '#', size: 'Pending' });
+                if (!State.queueProcessing) UI.showToast('Torrent started!');
+                finishMagnetAdd(callback);
+                return;
+            }
+
+            this._showModal(torrentId, files, title, callback);
+        },
+
+        _showModal(torrentId, files, title, callback) {
+            const container = DOM.create('div', { style: 'display:flex;flex-direction:column;gap:10px;max-height:60vh;' });
+
+            const headerRow = DOM.create('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px;' });
+            const selectAllBtn = DOM.create('button', { textContent: 'Select All', className: 'rd-input-btn' });
+            const selectNoneBtn = DOM.create('button', { textContent: 'Select None', className: 'rd-input-btn' });
+            headerRow.append(selectAllBtn, selectNoneBtn);
+            container.append(headerRow);
+
+            const fileList = DOM.create('div', { style: 'overflow-y:auto;max-height:50vh;display:flex;flex-direction:column;gap:4px;' });
+            const checkboxes = [];
+
+            files.forEach((f) => {
+                const row = DOM.create('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--rd-radius-xs);cursor:pointer;font-size:13px;' });
+                const cb = DOM.create('input', { type: 'checkbox', checked: true, style: 'flex-shrink:0;' });
+                cb.dataset.fileId = f.id;
+                checkboxes.push(cb);
+
+                const parts = f.path.split('/');
+                const fileName = parts.pop();
+                const folderPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
+
+                const label = DOM.create('span');
+                if (folderPrefix) label.append(DOM.create('span', { textContent: folderPrefix, style: 'opacity:0.5;' }));
+                label.append(DOM.create('span', { textContent: fileName, style: 'font-weight:bold;' }));
+
+                row.append(cb, label, DOM.create('span', {
+                    textContent: formatBytes(f.bytes),
+                    style: 'margin-left:auto;opacity:0.6;font-size:12px;white-space:nowrap;'
+                }));
+                fileList.append(row);
+            });
+
+            container.append(fileList);
+
+            selectAllBtn.addEventListener('click', () => checkboxes.forEach((cb) => { cb.checked = true; }));
+            selectNoneBtn.addEventListener('click', () => checkboxes.forEach((cb) => { cb.checked = false; }));
+
+            const cancelBtn = DOM.create('button', { textContent: 'Cancel', className: 'rd-input-btn' });
+            const startBtn = DOM.create('button', { textContent: 'Start Download', className: 'rd-input-btn primary' });
+            const modal = UI.showModal(title, [container], [cancelBtn, startBtn]);
+
+            cancelBtn.addEventListener('click', () => {
+                modal.close();
+                API.del('/torrents/delete/' + torrentId);
+            });
+
+            startBtn.addEventListener('click', async () => {
+                const selectedIds = checkboxes.filter((cb) => cb.checked).map((cb) => cb.dataset.fileId);
+                if (selectedIds.length === 0) {
+                    UI.showToast('Select at least one file', 'error');
+                    return;
+                }
+                await API.post('/torrents/selectFiles/' + torrentId, { files: selectedIds.join(',') });
+                addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
+                UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
+                modal.close();
+                finishMagnetAdd(callback);
+            });
+        }
+    };
+
+    async function uploadTorrentFile(file, callback) {
+        if (!file || !file.name.endsWith('.torrent')) {
+            UI.showToast('Not a .torrent file', 'error');
+            return;
+        }
+        UI.showToast('Uploading torrent...');
+        const host = await API.resolveTorrentHost();
+        const endpoint = host ? '/torrents/addTorrent?host=' + encodeURIComponent(host) : '/torrents/addTorrent';
+        const res = await API.upload(endpoint, file);
+        if (!res.ok || !res.data || !res.data.id) {
+            UI.showToast('Upload failed: ' + (res.error || 'Unknown'), 'error');
+            return;
+        }
+        UI.showToast('Torrent uploaded — pick files');
+        await TorrentPicker.open(res.data.id, callback);
+    }
+
+
 // ===================== Tabs (Links + Page) =====================
 
     const Tabs = {};
+
+
+    function makeDeselectAllBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'None', style: 'margin:0;',
+            onClick: () => {
+                document.querySelectorAll(checkboxSelector).forEach(cb => { cb.checked = false; });
+                if (selectAllChk) { selectAllChk.checked = false; selectAllChk.indeterminate = false; }
+                UI.showToast('Selection cleared');
+            }
+        });
+    }
+
+    function makeInvertBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
+            onClick: () => {
+                const boxes = document.querySelectorAll(checkboxSelector);
+                let checked = 0;
+                boxes.forEach(cb => { cb.checked = !cb.checked; if (cb.checked) checked++; });
+                if (selectAllChk) {
+                    selectAllChk.checked = checked === boxes.length;
+                    selectAllChk.indeterminate = checked > 0 && checked < boxes.length;
+                }
+                UI.showToast('Inverted (' + checked + ' selected)');
+            }
+        });
+    }
+
+    function makeCopyUrlsBtn(getUrls) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
+            onClick: (e) => {
+                const urls = getUrls();
+                if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
+                UI.copyToClipboard(urls.join('\n'), e.currentTarget);
+                UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
+            }
+        });
+    }
+
+    function buildExportControls(scope) {
+        const wrapper = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center;' });
+        const select = DOM.create('select', { id: 'rd-export-format-' + scope, className: 'rd-select', style: 'padding:5px 8px;' });
+        ['raw:Plain Text', 'curl:cURL', 'wget:Wget'].forEach(opt => {
+            const [val, label] = opt.split(':');
+            const option = DOM.create('option', { value: val, textContent: label });
+            if (State.settings.exportFormat === val) option.selected = true;
+            select.append(option);
+        });
+        select.addEventListener('change', () => { State.settings.exportFormat = select.value; saveSettings(); });
+        const exportBtn = DOM.create('button', {
+            className: 'rd-input-btn primary', textContent: 'Export', style: 'margin:0;',
+            onClick: () => formatExport(getExportUrls(scope))
+        });
+        wrapper.append(select, exportBtn);
+        return wrapper;
+    }
+
+    function isPageLinkUncached(url) {
+        const cached = State.pageLinkCache.get(url);
+        if (cached === 'cached') return false;
+        if (cached === 'uncached') return true;
+        if (url.startsWith('magnet:')) {
+            for (const link of document.querySelectorAll('a.rd-processed')) {
+                if ((link.href || '') !== url) continue;
+                const icon = link.nextElementSibling;
+                if (icon && icon.classList.contains('rd-inline-icon')) {
+                    return icon.classList.contains('uncached') || !icon.classList.contains('cached');
+                }
+                return true;
+            }
+        }
+        return cached !== 'cached';
+    }
+
+    function getPageLinkBadge(url, linkType) {
+        if (linkType === 'magnet') {
+            const cached = State.pageLinkCache.get(url);
+            if (cached === 'cached') return { text: 'Cached', color: 'var(--rd-success)' };
+            if (cached === 'uncached') return { text: 'Uncached', color: 'var(--rd-warning)' };
+            return { text: 'Magnet', color: 'var(--rd-text-secondary)' };
+        }
+        const status = State.pageLinkCache.get(url);
+        if (status === 'cached') return { text: 'Cached', color: 'var(--rd-success)' };
+        if (status === 'uncached') return { text: 'Uncached', color: 'var(--rd-warning)' };
+        if (status === 'down') return { text: 'Host down', color: 'var(--rd-danger)' };
+        return { text: 'Unknown', color: 'var(--rd-text-secondary)' };
+    }
+    function playNotificationChime() {
+        if (!State.settings.notificationSound) return;
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.value = 880;
+            osc.type = 'sine';
+            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.5);
+        } catch(e) {}
+    }
+
 
     Tabs.Links = {
         render() {
@@ -2501,40 +2974,33 @@ GM_addStyle(`:root {
             if (logList) this._renderHistory(logList, State.linksHistoryFilter);
         },
 
-        _renderHistory(container, filterText) {
-            DOM.clear(container);
-            if (State.linkHistory.length === 0) {
-                container.append(DOM.create('div', {
-                    style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);',
-                    textContent: 'No history. Paste links below or drag & drop.'
-                }));
-                return;
-            }
-
+        _getFilteredHistory(filterText) {
             let filtered = State.linkHistory;
             const typeFilter = State.linksHistoryTypeFilter || 'all';
-            if (typeFilter === 'success') filtered = filtered.filter(item => item.type === 'success');
-            else if (typeFilter === 'error') filtered = filtered.filter(item => item.type === 'error');
+            if (typeFilter === 'success') filtered = filtered.filter((item) => item.type === 'success');
+            else if (typeFilter === 'error') filtered = filtered.filter((item) => item.type === 'error');
             if (filterText) {
                 const lf = filterText.toLowerCase();
-                filtered = filtered.filter(item => {
+                filtered = filtered.filter((item) => {
                     const hay = [(item.name || ''), (item.url || ''), (item.msg || '')].join(' ').toLowerCase();
                     return hay.includes(lf);
                 });
             }
+            const reversed = [];
+            for (let i = filtered.length - 1; i >= 0; i--) reversed.push(filtered[i]);
+            return reversed;
+        },
 
-            if (filtered.length === 0) {
-                container.append(DOM.create('div', {
-                    style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);',
-                    textContent: 'No matching history.'
-                }));
-                return;
-            }
-
-            // Render in reverse chronological order
-            for (let i = filtered.length - 1; i >= 0; i--) {
-                container.append(this._buildHistoryItem(filtered[i]));
-            }
+        _renderHistory(container, filterText) {
+            const filtered = this._getFilteredHistory(filterText);
+            ListRenderer.patch(container, filtered, {
+                key: (item) => (item.url || item.msg || '') + '|' + (item.time || '') + '|' + item.type,
+                compare: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+                emptyMessage: State.linkHistory.length === 0
+                    ? 'No history. Paste links below or drag & drop.'
+                    : 'No matching history.',
+                render: (item) => this._buildHistoryItem(item)
+            });
         },
 
         _buildHistoryItem(item) {
@@ -2569,10 +3035,7 @@ GM_addStyle(`:root {
                 btns.push(DOM.create('button', {
                     className: 'rd-action-btn rd-play-btn', textContent: 'Play',
                     dataset: { url: item.download || item.url, name: item.name },
-                    onClick: () => {
-                        if (State.settings.extPlayer === 'browser' && typeof Media !== 'undefined') Media.open(item.download || item.url, item.name);
-                        else window.open(getStreamUrl(item.download || item.url), '_self');
-                    }
+                    onClick: () => playMediaUrl(item.download || item.url, item.name)
                 }));
             }
             const row = DOM.create('div', { className: 'rd-log-item success' }, [
@@ -2596,80 +3059,14 @@ GM_addStyle(`:root {
         }
     };
 
-    function makeDeselectAllBtn(checkboxSelector, selectAllChk) {
-        return DOM.create('button', {
-            className: 'rd-input-btn', textContent: 'None', style: 'margin:0;',
-            onClick: () => {
-                document.querySelectorAll(checkboxSelector).forEach(cb => { cb.checked = false; });
-                if (selectAllChk) { selectAllChk.checked = false; selectAllChk.indeterminate = false; }
-                UI.showToast('Selection cleared');
-            }
-        });
-    }
-
-    function makeInvertBtn(checkboxSelector, selectAllChk) {
-        return DOM.create('button', {
-            className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
-            onClick: () => {
-                const boxes = document.querySelectorAll(checkboxSelector);
-                let checked = 0;
-                boxes.forEach(cb => { cb.checked = !cb.checked; if (cb.checked) checked++; });
-                if (selectAllChk) {
-                    selectAllChk.checked = checked === boxes.length;
-                    selectAllChk.indeterminate = checked > 0 && checked < boxes.length;
-                }
-                UI.showToast('Inverted (' + checked + ' selected)');
-            }
-        });
-    }
-
-    function makeCopyUrlsBtn(getUrls) {
-        return DOM.create('button', {
-            className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
-            onClick: (e) => {
-                const urls = getUrls();
-                if (!urls.length) { UI.showToast('No URLs to copy', 'error'); return; }
-                UI.copyToClipboard(urls.join('\n'), e.currentTarget);
-                UI.showToast('Copied ' + urls.length + ' URL' + (urls.length === 1 ? '' : 's'));
-            }
-        });
-    }
-
-    function buildExportControls(scope) {
-        const wrapper = DOM.create('div', { style: 'display:flex; gap:6px; align-items:center;' });
-        const select = DOM.create('select', { id: 'rd-export-format-' + scope, className: 'rd-select', style: 'padding:5px 8px;' });
-        ['raw:Plain Text', 'curl:cURL', 'wget:Wget'].forEach(opt => {
-            const [val, label] = opt.split(':');
-            const option = DOM.create('option', { value: val, textContent: label });
-            if (State.settings.exportFormat === val) option.selected = true;
-            select.append(option);
-        });
-        select.addEventListener('change', () => { State.settings.exportFormat = select.value; saveSettings(); });
-        const exportBtn = DOM.create('button', {
-            className: 'rd-input-btn primary', textContent: 'Export', style: 'margin:0;',
-            onClick: () => formatExport(getExportUrls(scope))
-        });
-        wrapper.append(select, exportBtn);
-        return wrapper;
-    }
-
-    function isPageLinkUncached(url) {
-        for (const link of document.querySelectorAll('a.rd-processed')) {
-            if ((link.href || '') !== url) continue;
-            const icon = link.nextElementSibling;
-            if (icon && icon.classList.contains('rd-inline-icon')) {
-                return icon.classList.contains('uncached') || !icon.classList.contains('cached');
-            }
-            return true;
-        }
-        return true;
-    }
 
     Tabs.Page = {
         render() {
             const area = document.getElementById('rd-content-area');
             if (!area) return;
             DOM.clear(area);
+            API.get('/hosts/status').then(({ ok, data }) => { if (ok && data) State.liveHosts = data; });
+            this.batchCheckLinks();
 
             if (State.scannedLinksMap.size === 0) {
                 area.append(DOM.create('div', {
@@ -2823,13 +3220,28 @@ GM_addStyle(`:root {
                         }
                     });
 
+                    const badge = getPageLinkBadge(link.url, link.type);
                     const item = DOM.create('div', { className: 'rd-log-item' }, [
                         chk,
                         DOM.create('div', { className: 'rd-item-content' }, [
                             DOM.create('div', { className: 'rd-filename', title: link.url, textContent: icon + ' ' + link.text }),
-                            DOM.create('div', { style: 'font-size:10px; color:var(--rd-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', textContent: link.url }),
+                            DOM.create('div', { style: 'display:flex; gap:8px; align-items:center;' }, [
+                                DOM.create('span', {
+                                    textContent: badge.text,
+                                    style: 'font-size:9px; font-weight:600; color:' + badge.color + ';'
+                                }),
+                                DOM.create('span', {
+                                    style: 'font-size:10px; color:var(--rd-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;',
+                                    textContent: link.url
+                                })
+                            ]),
                             DOM.create('div', { className: 'rd-btn-group' }, [oneClickBtn, queueItemBtn])
                         ])
+                    ]);
+                    addMobileLongPress(item, [
+                        { label: '1-Click', action: () => oneClickBtn.click() },
+                        { label: 'Queue', action: () => queueItemBtn.click() },
+                        { label: 'Copy URL', action: () => UI.copyToClipboard(link.url) }
                     ]);
                     groupContent.append(item);
                 }
@@ -2841,9 +3253,36 @@ GM_addStyle(`:root {
         },
 
         refresh() {
-            this.render(); // Page tab always fully rebuilds
+            this.render();
+        },
+
+        async batchCheckLinks() {
+            const hostUrls = [];
+            for (const [url, data] of State.scannedLinksMap.entries()) {
+                if (data.type === 'host' && !State.pageLinkCache.has(url)) hostUrls.push(url);
+            }
+            for (const url of hostUrls.slice(0, 50)) {
+                if (State.linkCheckCache.has(url)) {
+                    const info = State.linkCheckCache.get(url);
+                    State.pageLinkCache.set(url, info.includes('Unsupported') ? 'uncached' : 'cached');
+                    continue;
+                }
+                const { ok, data } = await API.post('/unrestrict/check', { link: url });
+                if (ok && data) {
+                    State.pageLinkCache.set(url, data.supported ? 'cached' : 'uncached');
+                    if (data.filename) {
+                        State.linkCheckCache.set(url, data.filename + ' \u2014 ' + (data.filesize ? formatBytes(data.filesize) : 'Unknown'));
+                    }
+                }
+            }
+            if (State.currentTab === 'page' && State.isExpanded) {
+                const area = document.getElementById('rd-content-area');
+                if (area && area.querySelector('.rd-page-chk')) this.render();
+            }
         }
     };
+
+
 
     Tabs.Torrents = {
         _pollingInterval: null,
@@ -2918,13 +3357,54 @@ GM_addStyle(`:root {
                     }
                 }));
             });
-            controlBar.append(topRow, searchInput, statusRow);
+            const addPanel = DOM.create('div', { style: 'display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;' });
+            const magnetInput = DOM.create('input', {
+                type: 'text', className: 'rd-search-bar', placeholder: 'Paste magnet link...',
+                style: 'margin:0; flex:1; min-width:140px;'
+            });
+            const addMagnetBtn = DOM.create('button', {
+                className: 'rd-input-btn primary', textContent: 'Add Magnet', style: 'margin:0;',
+                onClick: () => {
+                    const m = magnetInput.value.trim();
+                    if (!m.startsWith('magnet:')) return UI.showToast('Invalid magnet', 'error');
+                    addMagnet(m);
+                    magnetInput.value = '';
+                }
+            });
+            const torrentFileInput = DOM.create('input', { type: 'file', accept: '.torrent', style: 'display:none;' });
+            torrentFileInput.addEventListener('change', () => {
+                const file = torrentFileInput.files[0];
+                if (file) uploadTorrentFile(file);
+                torrentFileInput.value = '';
+            });
+            const uploadBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Upload .torrent', style: 'margin:0;',
+                onClick: () => torrentFileInput.click()
+            });
+            const deleteAllBtn = DOM.create('button', {
+                className: 'rd-input-btn danger', textContent: 'Delete All', style: 'margin:0;',
+                onClick: () => {
+                    if (prompt('Type DELETE ALL to remove every torrent') === 'DELETE ALL') deleteAllTorrentItems();
+                }
+            });
+            addPanel.append(magnetInput, addMagnetBtn, uploadBtn, deleteAllBtn, torrentFileInput);
+
+            controlBar.append(topRow, addPanel, searchInput, statusRow);
 
             const listContainer = DOM.create('div', { id: 'rd-torrent-list-container', className: 'rd-log-list' });
             area.append(controlBar, listContainer);
             addPullToRefresh(listContainer, () => this._fetchTorrents(true));
             this._renderList('');
+            this._fetchActiveCount();
             this.startPolling();
+        },
+
+        async _fetchActiveCount() {
+            const res = await API.getTorrentsActiveCount();
+            if (res.ok && typeof res.data === 'number') {
+                State.activeTorrentCount = res.data;
+                UI.updateHeaderQuota();
+            }
         },
 
         refresh() {
@@ -2933,38 +3413,33 @@ GM_addStyle(`:root {
             this._renderList(filter);
         },
 
-        _renderList(filterText) {
-            const container = document.getElementById('rd-torrent-list-container');
-            if (!container) return;
-            DOM.clear(container);
-
-            if (State.cachedTorrents.length === 0) {
-                container.append(DOM.create('div', { style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);', textContent: 'No active torrents.' }));
-                return;
-            }
-
+        _getFilteredTorrents(filterText) {
             let filtered = State.cachedTorrents;
             const statusFilter = State.torrentStatusFilter || 'all';
             if (statusFilter === 'active') {
-                filtered = filtered.filter(t => t.status !== 'downloaded' && t.status !== 'dead' && t.status !== 'error');
+                filtered = filtered.filter((t) => t.status !== 'downloaded' && t.status !== 'dead' && t.status !== 'error');
             } else if (statusFilter === 'done') {
-                filtered = filtered.filter(t => t.status === 'downloaded');
+                filtered = filtered.filter((t) => t.status === 'downloaded');
             } else if (statusFilter === 'error') {
-                filtered = filtered.filter(t => t.status === 'dead' || t.status === 'error');
+                filtered = filtered.filter((t) => t.status === 'dead' || t.status === 'error');
             }
             if (filterText) {
                 const lf = filterText.toLowerCase();
-                filtered = filtered.filter(t => t.filename.toLowerCase().includes(lf));
+                filtered = filtered.filter((t) => t.filename.toLowerCase().includes(lf));
             }
+            return filtered;
+        },
 
-            if (filtered.length === 0) {
-                container.append(DOM.create('div', { style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);', textContent: 'No matching torrents.' }));
-                return;
-            }
-
-            for (const t of filtered) {
-                container.append(this._buildTorrentItem(t));
-            }
+        _renderList(filterText) {
+            const container = document.getElementById('rd-torrent-list-container');
+            if (!container) return;
+            const filtered = this._getFilteredTorrents(filterText);
+            ListRenderer.patch(container, filtered, {
+                key: (t) => t.id,
+                compare: ListRenderer.torrentCompare,
+                emptyMessage: State.cachedTorrents.length === 0 ? 'No active torrents.' : 'No matching torrents.',
+                render: (t) => this._buildTorrentItem(t)
+            });
         },
 
         _buildTorrentItem(t) {
@@ -2988,9 +3463,19 @@ GM_addStyle(`:root {
                 }));
             }
 
-            // Action buttons
             const actionChildren = [];
+            if (t.status === 'waiting_files_selection') {
+                actionChildren.push(DOM.create('span', {
+                    className: 'rd-dl-badge', textContent: 'Pick Files',
+                    style: 'background:var(--rd-accent);',
+                    onClick: () => TorrentPicker.open(t.id)
+                }));
+            }
             if (isDone && t.links && t.links.length > 0) {
+                actionChildren.push(DOM.create('span', {
+                    className: 'rd-dl-badge', textContent: 'Play',
+                    onClick: () => playTorrentVideos(t)
+                }));
                 if (t.links.length === 1) {
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: '1 File',
@@ -3021,7 +3506,7 @@ GM_addStyle(`:root {
             const progressFill = DOM.create('div', { className: 'rd-progress-fill', style: 'width:' + progWidth + '%; background:' + color + ';' });
             progressTrack.append(progressFill);
 
-            return DOM.create('div', { className: 'rd-log-item' + (isDone ? ' success' : '') }, [
+            const row = DOM.create('div', { className: 'rd-log-item' + (isDone ? ' success' : '') }, [
                 chk,
                 DOM.create('div', { className: 'rd-item-content' }, [
                     DOM.create('div', { className: 'rd-filename', title: t.filename, style: 'color:' + color + ';', textContent: t.filename }),
@@ -3034,6 +3519,12 @@ GM_addStyle(`:root {
                 ]),
                 DOM.create('div', { className: 'rd-item-actions', style: 'flex-direction:column;' }, actionChildren)
             ]);
+            addMobileLongPress(row, [
+                { label: 'Delete', action: () => deleteTorrent(t.id) },
+                ...(isDone && t.links?.length ? [{ label: 'Play', action: () => playTorrentVideos(t) }] : []),
+                ...(t.status === 'waiting_files_selection' ? [{ label: 'Pick Files', action: () => TorrentPicker.open(t.id) }] : [])
+            ]);
+            return row;
         },
 
         startPolling() {
@@ -3088,13 +3579,15 @@ GM_addStyle(`:root {
         }
     };
 
+
     Tabs.Cloud = {
         render() {
             const area = document.getElementById('rd-content-area');
             if (!area) return;
             DOM.clear(area);
+            State.cloudPage = 1;
             area.append(DOM.create('div', { style: 'text-align:center; padding:16px; color:var(--rd-text-secondary);', textContent: 'Loading…' }));
-            this._fetchCloud();
+            this._fetchCloud(true);
         },
 
         refresh() {
@@ -3103,9 +3596,11 @@ GM_addStyle(`:root {
             this._renderList(filter);
         },
 
-        async _fetchCloud() {
+        async _fetchCloud(reset) {
             const limit = parseInt(State.settings.cloudLimit, 10) || 100;
-            const { ok, data, error } = await API.get('/downloads?limit=' + limit);
+            if (reset) State.cloudPage = 1;
+            const page = State.cloudPage || 1;
+            const { ok, data, error } = await API.getDownloadsPage(limit, page);
             if (State.currentTab !== 'cloud') return;
             if (!ok) {
                 if (loadOfflineData('rd_cached_cloud', 'cachedCloud')) {
@@ -3116,9 +3611,22 @@ GM_addStyle(`:root {
                 }
                 return;
             }
-            State.cachedCloud = data || [];
+            const batch = data || [];
+            if (reset || page === 1) {
+                State.cachedCloud = batch;
+            } else {
+                const existingIds = new Set(State.cachedCloud.map((c) => c.id));
+                batch.forEach((item) => { if (!existingIds.has(item.id)) State.cachedCloud.push(item); });
+            }
+            State.cloudHasMore = batch.length >= limit;
             GM_setValue('rd_cached_cloud', JSON.stringify(State.cachedCloud));
             this._renderBase();
+        },
+
+        async _loadMore() {
+            State.cloudPage = (State.cloudPage || 1) + 1;
+            UI.showToast('Loading more...');
+            await this._fetchCloud(false);
         },
 
         _renderBase() {
@@ -3126,42 +3634,43 @@ GM_addStyle(`:root {
             if (!area) return;
             DOM.clear(area);
 
-            if (State.cachedCloud.length === 0) {
-                area.append(DOM.create('div', { style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);', textContent: 'Cloud history empty.' }));
-                return;
-            }
-
-            // Control bar
             const controlBar = DOM.create('div', { className: 'rd-control-bar', style: 'flex-direction:column; align-items:stretch;' });
-            const topRow = DOM.create('div', { style: 'display:flex; justify-content:space-between; align-items:center; width:100%;' });
+            const topRow = DOM.create('div', { style: 'display:flex; justify-content:space-between; align-items:center; width:100%; flex-wrap:wrap; gap:8px;' });
 
             const leftGroup = DOM.create('div', { className: 'rd-control-group' });
             const selectAllLabel = DOM.create('label', { style: 'display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer; font-weight:600;' });
             const selectAllChk = DOM.create('input', { type: 'checkbox', id: 'rd-cloud-chk-all', className: 'rd-checkbox' });
-            selectAllChk.addEventListener('change', () => document.querySelectorAll('.rd-cloud-chk').forEach(c => c.checked = selectAllChk.checked));
+            selectAllChk.addEventListener('change', () => document.querySelectorAll('.rd-cloud-chk').forEach((c) => { c.checked = selectAllChk.checked; }));
             selectAllLabel.append(selectAllChk, DOM.text('All'));
 
             const delSelBtn = DOM.create('button', {
                 className: 'rd-input-btn danger', textContent: 'Delete', style: 'margin:0;',
                 onClick: () => {
-                    const sel = Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.value);
+                    const sel = Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map((c) => c.value);
                     if (!sel.length) return;
                     if (confirm('Delete ' + sel.length + ' files from cloud?')) {
-                        sel.forEach(id => deleteCloudItem(id));
+                        sel.forEach((id) => deleteCloudItem(id));
                     }
                 }
             });
             const cloudRefreshBtn = DOM.create('button', {
                 className: 'rd-input-btn', textContent: 'Refresh', style: 'margin:0;',
-                onClick: () => this._fetchCloud()
+                onClick: () => this.render()
+            });
+            const deleteAllBtn = DOM.create('button', {
+                className: 'rd-input-btn danger', textContent: 'Delete All', style: 'margin:0;',
+                onClick: () => {
+                    if (prompt('Type DELETE ALL to wipe cloud history') === 'DELETE ALL') deleteAllCloudItems();
+                }
             });
             leftGroup.append(
                 selectAllLabel,
                 makeDeselectAllBtn('.rd-cloud-chk', selectAllChk),
                 makeInvertBtn('.rd-cloud-chk', selectAllChk),
                 cloudRefreshBtn,
-                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
-                delSelBtn
+                makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map((c) => c.dataset.url).filter((u) => u && u !== '#')),
+                delSelBtn,
+                deleteAllBtn
             );
             topRow.append(leftGroup, buildExportControls('cloud'));
 
@@ -3172,7 +3681,7 @@ GM_addStyle(`:root {
                 onInput: () => this._renderList(searchInput.value)
             });
             const sortSelect = DOM.create('select', { id: 'rd-cloud-sort', className: 'rd-select', style: 'padding:6px; margin:0;' });
-            ['newest:Newest', 'oldest:Oldest', 'largest:Largest', 'smallest:Smallest'].forEach(opt => {
+            ['newest:Newest', 'oldest:Oldest', 'largest:Largest', 'smallest:Smallest'].forEach((opt) => {
                 const [val, label] = opt.split(':');
                 sortSelect.append(DOM.create('option', { value: val, textContent: label }));
             });
@@ -3182,22 +3691,24 @@ GM_addStyle(`:root {
             controlBar.append(topRow, bottomRow);
 
             const listContainer = DOM.create('div', { id: 'rd-cloud-list-container', className: 'rd-log-list' });
-            area.append(controlBar, listContainer);
-            addPullToRefresh(listContainer, () => this._fetchCloud());
+            const loadMoreBtn = DOM.create('button', {
+                id: 'rd-cloud-load-more',
+                className: 'rd-input-btn',
+                textContent: 'Load More',
+                style: 'width:100%; margin-top:8px; display:' + (State.cloudHasMore ? 'block' : 'none') + ';',
+                onClick: () => this._loadMore()
+            });
+            area.append(controlBar, listContainer, loadMoreBtn);
+            addPullToRefresh(listContainer, () => this.render());
             this._renderList('');
         },
 
-        _renderList(filterText) {
-            const container = document.getElementById('rd-cloud-list-container');
-            if (!container) return;
-            DOM.clear(container);
-
+        _getFilteredCloud(filterText) {
             let filtered = [...State.cachedCloud];
             if (filterText) {
                 const lf = filterText.toLowerCase();
-                filtered = filtered.filter(item => item.filename.toLowerCase().includes(lf));
+                filtered = filtered.filter((item) => item.filename.toLowerCase().includes(lf));
             }
-
             const sortMode = document.getElementById('rd-cloud-sort')?.value || 'newest';
             filtered.sort((a, b) => {
                 if (sortMode === 'newest') return new Date(b.generated) - new Date(a.generated);
@@ -3205,64 +3716,74 @@ GM_addStyle(`:root {
                 if (sortMode === 'largest') return b.filesize - a.filesize;
                 return a.filesize - b.filesize;
             });
+            return filtered;
+        },
 
-            for (const item of filtered) {
-                const isMedia = /\.(mp4|mkv|avi|mov|mp3|flac|wav|jpg|png|webp)$/i.test(item.filename);
-                const btns = [
-                    DOM.create('button', { className: 'rd-action-btn', textContent: 'DL', onClick: () => window.open(item.download, '_blank') }),
-                    DOM.create('button', { className: 'rd-action-btn', textContent: 'URL', onClick: () => UI.copyToClipboard(item.download) })
-                ];
-                if (isMedia) {
-                    btns.push(DOM.create('button', {
-                        className: 'rd-action-btn', textContent: 'Play',
-                        onClick: () => {
-                            if (State.settings.extPlayer === 'browser' && typeof Media !== 'undefined') Media.open(item.download, item.filename);
-                            else window.open(getStreamUrl(item.download), '_self');
-                        }
-                    }));
-                }
+        _renderList(filterText) {
+            const container = document.getElementById('rd-cloud-list-container');
+            if (!container) return;
+            const filtered = this._getFilteredCloud(filterText);
+            ListRenderer.patch(container, filtered, {
+                key: (item) => item.id,
+                compare: ListRenderer.cloudCompare,
+                emptyMessage: 'Cloud history empty.',
+                render: (item) => this._buildCloudItem(item)
+            });
+            const loadMore = document.getElementById('rd-cloud-load-more');
+            if (loadMore) loadMore.style.display = State.cloudHasMore ? 'block' : 'none';
+        },
 
-                const chk = DOM.create('input', { type: 'checkbox', className: 'rd-cloud-chk rd-checkbox', value: item.id, dataset: { url: item.download } });
-                const delBtn = DOM.create('span', {
-                    style: 'color:var(--rd-danger); cursor:pointer; padding:0 4px; font-size:16px; font-weight:bold;',
-                    textContent: '\u2715',
-                    onClick: () => deleteCloudItem(item.id)
-                });
-
-                container.append(DOM.create('div', { className: 'rd-log-item success' }, [
-                    chk,
-                    DOM.create('div', { className: 'rd-item-content' }, [
-                        DOM.create('div', { style: 'display:flex; justify-content:space-between; align-items:flex-start;' }, [
-                            DOM.create('div', { className: 'rd-filename', title: item.filename, style: 'flex:1;', textContent: item.filename }),
-                            delBtn
-                        ]),
-                        DOM.create('div', { className: 'rd-meta' }, [
-                            DOM.create('span', { textContent: formatBytes(item.filesize) }),
-                            DOM.create('span', { textContent: new Date(item.generated).toLocaleDateString() })
-                        ]),
-                        DOM.create('div', { className: 'rd-btn-group' }, btns)
-                    ])
-                ]));
+        _buildCloudItem(item) {
+            const isMedia = /\.(mp4|mkv|avi|mov|mp3|flac|wav|jpg|png|webp)$/i.test(item.filename);
+            const btns = [
+                DOM.create('button', { className: 'rd-action-btn', textContent: 'DL', onClick: () => window.open(item.download, '_blank') }),
+                DOM.create('button', { className: 'rd-action-btn', textContent: 'URL', onClick: () => UI.copyToClipboard(item.download) }),
+                DOM.create('button', {
+                    className: 'rd-action-btn', textContent: 'Rename',
+                    onClick: () => {
+                        const newName = prompt('New filename:', item.filename);
+                        if (newName && newName !== item.filename) renameCloudItem(item.id, newName);
+                    }
+                })
+            ];
+            if (isMedia) {
+                btns.push(DOM.create('button', {
+                    className: 'rd-action-btn', textContent: 'Play',
+                    onClick: () => playMediaUrl(item.download, item.filename, item.id)
+                }));
             }
+
+            const chk = DOM.create('input', { type: 'checkbox', className: 'rd-cloud-chk rd-checkbox', value: item.id, dataset: { url: item.download } });
+            const delBtn = DOM.create('span', {
+                style: 'color:var(--rd-danger); cursor:pointer; padding:0 4px; font-size:16px; font-weight:bold;',
+                textContent: '\u2715',
+                onClick: () => deleteCloudItem(item.id)
+            });
+
+            const row = DOM.create('div', { className: 'rd-log-item success' }, [
+                chk,
+                DOM.create('div', { className: 'rd-item-content' }, [
+                    DOM.create('div', { style: 'display:flex; justify-content:space-between; align-items:flex-start;' }, [
+                        DOM.create('div', { className: 'rd-filename', title: item.filename, style: 'flex:1;', textContent: item.filename }),
+                        delBtn
+                    ]),
+                    DOM.create('div', { className: 'rd-meta' }, [
+                        DOM.create('span', { textContent: formatBytes(item.filesize) }),
+                        DOM.create('span', { textContent: new Date(item.generated).toLocaleDateString() })
+                    ]),
+                    DOM.create('div', { className: 'rd-btn-group' }, btns)
+                ])
+            ]);
+            addMobileLongPress(row, [
+                { label: 'Copy URL', action: () => UI.copyToClipboard(item.download) },
+                { label: 'Download', action: () => window.open(item.download, '_blank') },
+                ...(isMedia ? [{ label: 'Play', action: () => playMediaUrl(item.download, item.filename, item.id) }] : []),
+                { label: 'Delete', action: () => deleteCloudItem(item.id) }
+            ]);
+            return row;
         }
     };
 
-    function playNotificationChime() {
-        if (!State.settings.notificationSound) return;
-        try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.frequency.value = 880;
-            osc.type = 'sine';
-            gain.gain.setValueAtTime(0.3, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.5);
-        } catch(e) {}
-    }
 
     Tabs.Settings = {
         render() {
@@ -3360,6 +3881,28 @@ GM_addStyle(`:root {
             }
             wrapper.append(card);
 
+            if (!State.trafficDetails) {
+                wrapper.append(DOM.create('button', {
+                    className: 'rd-input-btn', textContent: 'Load Traffic Details', style: 'width:100%; margin-bottom:12px;',
+                    onClick: async () => {
+                        const res = await API.getTrafficDetails();
+                        if (res.ok) {
+                            State.trafficDetails = res.data;
+                            this.render();
+                        } else {
+                            UI.showToast('Could not load traffic details', 'error');
+                        }
+                    }
+                }));
+            } else if (State.trafficDetails && typeof State.trafficDetails === 'object') {
+                const detailsSection = DOM.create('div', { style: 'margin-bottom:16px; font-size:11px; color:var(--rd-text-secondary);' });
+                detailsSection.append(DOM.create('div', { style: 'font-weight:bold; margin-bottom:6px; color:var(--rd-text-primary);', textContent: 'Traffic Details' }));
+                Object.entries(State.trafficDetails).slice(0, 8).forEach(([host, d]) => {
+                    detailsSection.append(DOM.create('div', { textContent: host + ': ' + formatBytes(d.bytes || 0) }));
+                });
+                wrapper.append(detailsSection);
+            }
+
             // --- Preferences ---
             wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin-bottom:8px; color:var(--rd-success);', textContent: 'Preferences' }));
 
@@ -3377,7 +3920,8 @@ GM_addStyle(`:root {
                 { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
                 { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
                 { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' },
-                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' }
+                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' },
+                { key: 'useApiHostRegex', label: 'Use API Host Regex', desc: 'Use Real-Debrid /hosts/regex for link detection (fallback to built-in list)' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -3434,6 +3978,7 @@ GM_addStyle(`:root {
                 onClick: () => {
                     State.unrestrictCache.clear();
                     State.linkCheckCache.clear();
+                    State.pageLinkCache.clear();
                     UI.showToast('Session caches cleared');
                 }
             }));
@@ -3518,7 +4063,9 @@ GM_addStyle(`:root {
         },
 
         _exportSettings() {
-            const data = { settings: State.settings, apiKey: State.apiKey };
+            const includeKey = confirm('Include API key in backup?\n\nOK = include key\nCancel = settings only');
+            const data = { settings: State.settings };
+            if (includeKey) data.apiKey = State.apiKey;
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = DOM.create('a', { href: url, download: 'rd-settings-backup.json' });
@@ -3584,6 +4131,18 @@ const Scanner = {
         API.get('/hosts/status').then(({ ok, data }) => {
             if (ok && data) State.liveHosts = data;
         });
+
+        if (State.settings.useApiHostRegex) {
+            API.getHostsRegex().then(({ ok, data }) => {
+                if (ok && data && data.regex) {
+                    State.apiHostRegex = data.regex;
+                    Config.hostRegex = Config.getActiveRegex();
+                }
+            });
+            API.getHostsRegexFolder().then(({ ok, data }) => {
+                if (ok && data && data.regex) State.apiHostRegexFolder = data.regex;
+            });
+        }
 
         // MutationObserver
         this._observer = new MutationObserver(() => {
@@ -3706,6 +4265,7 @@ const Scanner = {
         const icon = DOM.create('span', {
             className: 'rd-inline-icon ' + extraClass,
             textContent: text,
+            dataset: { linkUrl: linkUrl || '' },
             title: extraClass === 'error' ? '' : 'Unrestrict (Right-click to copy)',
             onClick: (e) => { e.preventDefault(); e.stopPropagation(); handler(); },
             onContextmenu: (e) => {
@@ -3728,6 +4288,31 @@ const Scanner = {
 
         target.parentNode.insertBefore(icon, target.nextSibling);
 
+        if (State.isMobile && extraClass !== 'error' && linkUrl) {
+            addMobileLongPress(icon, [{
+                label: 'File info',
+                action: async () => {
+                    if (linkUrl.startsWith('magnet:')) {
+                        UI.showToast(icon.dataset.cache || 'Checking cache...');
+                        return;
+                    }
+                    let info = State.linkCheckCache.get(linkUrl);
+                    if (!info) {
+                        const { ok, data } = await API.post('/unrestrict/check', { link: linkUrl });
+                        if (ok && data && data.supported) {
+                            info = data.filename + ' \u2014 ' + (data.filesize ? formatBytes(data.filesize) : 'Unknown');
+                            State.linkCheckCache.set(linkUrl, info);
+                            State.pageLinkCache.set(linkUrl, 'cached');
+                        } else {
+                            info = 'Unsupported or uncached';
+                            State.pageLinkCache.set(linkUrl, 'uncached');
+                        }
+                    }
+                    UI.showModal('Link Info', [DOM.create('div', { textContent: info, style: 'font-size:13px;' })], []);
+                }
+            }]);
+        }
+
         // Magnet tooltip
         if (text === '\u{1F9F2}') {
             icon.addEventListener('mouseenter', () => { if (icon.dataset.cache) this._showTooltip(icon, icon.dataset.cache); });
@@ -3741,7 +4326,7 @@ const Scanner = {
         const hashMatch = magnetLink.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
         if (!hashMatch) return;
         const hash = hashMatch[1].toLowerCase();
-        State.magnetCacheQueue.push({ hash, el: iconElement });
+        State.magnetCacheQueue.push({ hash, el: iconElement, magnet: magnetLink });
 
         clearTimeout(State.cacheCheckTimer);
         State.cacheCheckTimer = setTimeout(async () => {
@@ -3753,14 +4338,17 @@ const Scanner = {
             if (!ok || !data) return;
             batch.forEach(item => {
                 const hostData = data[item.hash];
+                const magnetUrl = item.magnet || item.el.dataset.linkUrl || '';
                 if (hostData && hostData.rd && hostData.rd.length > 0) {
                     item.el.classList.add('cached');
-                    item.el.textContent = '\u{1F7E2} \u{1F9F2}'; // green circle + magnet
+                    item.el.textContent = '\u{1F7E2} \u{1F9F2}';
                     item.el.dataset.cache = 'Cached';
+                    if (magnetUrl) State.pageLinkCache.set(magnetUrl, 'cached');
                 } else {
                     item.el.classList.add('uncached');
-                    item.el.textContent = '\u{1F7E1} \u{1F9F2}'; // yellow circle + magnet
+                    item.el.textContent = '\u{1F7E1} \u{1F9F2}';
                     item.el.dataset.cache = 'Uncached';
+                    if (magnetUrl) State.pageLinkCache.set(magnetUrl, 'uncached');
                 }
             });
         }, 500);
@@ -3858,11 +4446,12 @@ const Media = {
     _playlistIndex: 0,
     _keyHandler: null,
 
-    open(url, filename, playlist = null) {
-        this.close(); // Clean up any existing player
+    open(url, filename, playlist = null, mode = 'direct') {
+        this.close();
 
-        this._playlist = playlist; // Array of { url, filename } or null
+        this._playlist = playlist;
         this._playlistIndex = 0;
+        this._playMode = mode;
 
         const win = DOM.create('div', { id: 'rd-media-window' });
 
@@ -3911,8 +4500,17 @@ const Media = {
             onClick: () => this.close()
         }));
 
+        const titleChildren = [
+            DOM.create('span', { style: 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;', textContent: filename })
+        ];
+        if (mode === 'transcode') {
+            titleChildren.push(DOM.create('span', {
+                textContent: 'Transcode',
+                style: 'font-size:9px;background:var(--rd-warning);color:var(--rd-bg-base);padding:2px 6px;border-radius:6px;margin-left:6px;'
+            }));
+        }
         const header = DOM.create('div', { id: 'rd-media-drag-handle' }, [
-            DOM.create('span', { style: 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;', textContent: filename }),
+            DOM.create('div', { style: 'display:flex;align-items:center;flex:1;min-width:0;' }, titleChildren),
             controls
         ]);
         win.append(header);
@@ -3949,7 +4547,13 @@ const Media = {
         } else {
             const fallback = DOM.create('div', { style: 'padding:24px; text-align:center;' });
             fallback.append(
-                DOM.create('div', { textContent: 'Format not natively supported.' }),
+                DOM.create('div', { textContent: 'Format not natively supported in browser.' }),
+                DOM.create('button', {
+                    className: 'rd-input-btn primary',
+                    textContent: 'Open in External Player',
+                    style: 'margin-top:12px;',
+                    onClick: () => window.open(getStreamUrl(url), '_self')
+                }),
                 DOM.create('a', { href: url, target: '_blank', style: 'color:var(--rd-accent); margin-top:12px; display:inline-block; font-weight:bold;', textContent: 'Download File' })
             );
             win.append(fallback);

@@ -7,9 +7,10 @@ A Tampermonkey userscript that turns any webpage into a Real-Debrid workstation 
 - **Page scanner** — Inline icons on supported host links and magnets across any site
 - **Smart magnets** — Instant cache check; auto, video-only, all-files, or manual selection
 - **Links tab** — Paste, drag-and-drop, batch unrestrict, history, and export (plain / curl / wget)
-- **Torrents tab** — Live progress, speed/ETA, M3U export, bulk delete, dead torrent cleanup
-- **Cloud tab** — Real-Debrid download history with search, sort, and bulk actions
-- **Media player** — In-browser video/audio with PiP; deep links to VLC, IINA, Infuse
+- **Torrents tab** — Add magnet/upload `.torrent`, file picker, live progress, Play/M3U, bulk delete
+- **Cloud tab** — Paginated history, Load More, rename, search, sort, bulk delete
+- **Media player** — In-browser playback with RD transcode fallback; PiP; VLC, IINA, Infuse
+- **Page cache badges** — Cached/Uncached status for host links and magnets
 - **Mobile** — Bottom sheet UI, swipe dismiss, pull-to-refresh, long-press menus
 - **Liquid Glass UI** — Dark glassmorphism that stays readable on any page
 
@@ -58,6 +59,7 @@ npm install
 npm run split    # split monolith into src/modules/ (after editing RealDebrid v37.js)
 npm run build    # bundle src/ → dist/real-debrid-suite.user.js
 npm run lint     # ESLint
+npm test         # Vitest (settings migration, utils)
 ```
 
 Source modules live in `src/`. The bundled output in `dist/` is what users install.

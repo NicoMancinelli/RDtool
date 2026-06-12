@@ -113,13 +113,7 @@
                 if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
                     for (const file of e.dataTransfer.files) {
                         if (file.name.endsWith('.torrent')) {
-                            API.upload('/torrents/addTorrent', file).then(res => {
-                                if (res.ok) {
-                                    UI.showToast('Torrent uploaded: ' + file.name);
-                                } else {
-                                    UI.showToast('Upload failed: ' + (res.error || 'Unknown'), 'error');
-                                }
-                            });
+                            uploadTorrentFile(file);
                         }
                     }
                     return;
@@ -196,13 +190,21 @@
                     className: 'rd-input-btn primary',
                     textContent: 'Save Key',
                     style: 'padding:10px;font-size:13px;',
-                    onClick: () => {
+                    onClick: async () => {
                         const key = input.value.trim();
                         if (key.length < 5) {
                             UI.showToast('Key too short', 'error');
                             return;
                         }
+                        const prevKey = State.apiKey;
                         Config.saveKey(key);
+                        const userRes = await API.get('/user');
+                        if (!userRes.ok) {
+                            Config.clearKey();
+                            if (prevKey) Config.saveKey(prevKey);
+                            UI.showToast('Invalid API key — check and try again', 'error');
+                            return;
+                        }
                         UI.showToast('API key saved! Reloading...');
                         setTimeout(() => location.reload(), 800);
                     }
@@ -317,6 +319,11 @@
                         id: 'rd-session-counter'
                     }),
                     DOM.create('span', {
+                        id: 'rd-header-quota',
+                        style: 'font-size:9px;color:var(--rd-accent);background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;border:1px solid var(--rd-glass-border);',
+                        textContent: ''
+                    }),
+                    DOM.create('span', {
                         id: 'rd-queue-progress',
                         className: 'rd-queue-status',
                         style: State.queueProcessing ? '' : 'display:none;',
@@ -385,7 +392,9 @@
             container.appendChild(tabs);
             container.appendChild(contentArea);
 
-            // Render current tab content
+            UI.fetchAccountSummary();
+            UI.updateHeaderQuota();
+
             const capKey = State.currentTab.charAt(0).toUpperCase() + State.currentTab.slice(1);
             if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
@@ -395,6 +404,41 @@
                     textContent: 'Tab "' + capKey + '" not loaded yet.'
                 }));
             }
+        },
+
+        async fetchAccountSummary() {
+            if (!State.apiKey) return;
+            const userRes = await API.get('/user');
+            if (userRes.ok) State.userProfile = userRes.data;
+            const trafficRes = await API.get('/traffic');
+            if (trafficRes.ok) State.trafficData = trafficRes.data;
+            const countRes = await API.getTorrentsActiveCount();
+            if (countRes.ok && typeof countRes.data === 'number') State.activeTorrentCount = countRes.data;
+            UI.updateHeaderQuota();
+        },
+
+        updateHeaderQuota() {
+            const el = document.getElementById('rd-header-quota');
+            if (!el) return;
+            const parts = [];
+            if (State.userProfile && State.userProfile.expiration) {
+                const daysLeft = Math.max(0, Math.ceil((new Date(State.userProfile.expiration) - new Date()) / 86400000));
+                parts.push(daysLeft + 'd left');
+            }
+            if (State.trafficData) {
+                const quotas = Object.entries(State.trafficData).filter(([, d]) => d.limit && d.limit > 0);
+                if (quotas.length) {
+                    const [, d] = quotas[0];
+                    const pct = Math.round(((d.limit - d.left) / d.limit) * 100);
+                    parts.push('Quota ' + pct + '%');
+                    if (pct >= 90) UI.showToast('Daily quota almost exhausted', 'error');
+                }
+            }
+            if (typeof State.activeTorrentCount === 'number') {
+                parts.push(State.activeTorrentCount + ' active');
+            }
+            el.textContent = parts.join(' · ');
+            el.style.display = parts.length ? '' : 'none';
         },
 
         showToast(msg, type = 'info') {

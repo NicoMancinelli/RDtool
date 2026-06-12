@@ -2,7 +2,8 @@
     // =========================================================================
 
     const Config = {
-        VERSION: '38.9',
+        VERSION: '40.0',
+        SETTINGS_VERSION: 2,
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -38,7 +39,8 @@
             cloudLimit: '100',
             useUnrestrictCache: true,
             apiRateLimit: '4',
-            maxLinksPerScan: '150'
+            maxLinksPerScan: '150',
+            useApiHostRegex: true
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -64,18 +66,22 @@
         },
 
         getActiveRegex() {
+            if (State.settings.useApiHostRegex && State.apiHostRegex) {
+                try {
+                    return new RegExp(State.apiHostRegex, 'i');
+                } catch (e) { /* fall through */ }
+            }
+
             const allHosts = [...this.BASE_HOSTS];
 
-            // Add dynamic hosts
             if (State.dynamicHosts && State.dynamicHosts.length) {
-                State.dynamicHosts.forEach(h => {
+                State.dynamicHosts.forEach((h) => {
                     allHosts.push(h.replace(/\./g, '\\.'));
                 });
             }
 
-            // Add custom hosts from settings
             if (State.settings && State.settings.customHosts) {
-                State.settings.customHosts.split(',').map(h => h.trim()).filter(Boolean).forEach(h => {
+                State.settings.customHosts.split(',').map((h) => h.trim()).filter(Boolean).forEach((h) => {
                     allHosts.push(h.replace(/\./g, '\\.'));
                 });
             }

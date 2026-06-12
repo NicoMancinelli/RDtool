@@ -30,10 +30,7 @@
                 url: cached.url, download: cached.url,
                 size: cached.size
             });
-            if (!silent) {
-                if (State.settings.defaultAction === 'dl') window.open(cached.url, '_blank');
-                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(cached.url);
-            }
+            if (!silent) applyDefaultAction(cached.url);
             return cached.url;
         }
 
@@ -54,11 +51,13 @@
             url: dlUrl, download: dlUrl,
             size: entry.size
         });
-        if (!silent) {
-            if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
-            else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(dlUrl);
-        }
+        if (!silent) applyDefaultAction(dlUrl);
         return dlUrl;
+    }
+
+    function applyDefaultAction(url) {
+        if (State.settings.defaultAction === 'dl') window.open(url, '_blank');
+        else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(url);
     }
 
     async function unrestrictLinkOrFolder(url, silent = false, filter = null, callback = null) {
@@ -70,10 +69,7 @@
                 url: dlUrl, download: dlUrl,
                 size: formatBytes(data.filesize)
             });
-            if (!silent) {
-                if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
-                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(dlUrl);
-            }
+            if (!silent) applyDefaultAction(dlUrl);
             if (callback) callback(dlUrl);
             return dlUrl;
         }
@@ -177,7 +173,9 @@
 
     async function addMagnet(magnet, callback = null) {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
-        const { ok, data, error } = await API.post('/torrents/addMagnet', { magnet: magnet });
+        const host = await API.resolveTorrentHost();
+        const endpoint = host ? '/torrents/addMagnet?host=' + encodeURIComponent(host) : '/torrents/addMagnet';
+        const { ok, data, error } = await API.post(endpoint, { magnet: magnet });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
             return;
@@ -207,106 +205,66 @@
         const files = infoRes.data.files;
         const title = infoRes.data.filename || 'Torrent';
 
-        if (State.settings.magnetAction === 'manual') {
-            showTorrentSelectorModal(torrentId, files, title, callback);
-            return;
-        }
-
-        if (State.settings.magnetAction === 'video') {
-            const videoExts = /\.(mp4|mkv|avi|mov|webm)$/i;
-            let largestId = null, maxSize = 0;
-            files.forEach(f => {
-                if (videoExts.test(f.path) && f.bytes > maxSize) { maxSize = f.bytes; largestId = f.id; }
-            });
-            if (largestId) {
-                await API.post('/torrents/selectFiles/' + torrentId, { files: String(largestId) });
-                addToHistory({ type: 'success', name: 'Main Video Added', url: '#', size: formatBytes(maxSize) });
-                if (!State.queueProcessing) UI.showToast('Main Video Added!');
-                finishMagnetAdd(callback);
-            } else {
-                // No video found — fallback to manual
-                showTorrentSelectorModal(torrentId, files, title, callback);
-            }
-            return;
-        }
-
-        // Smart mode (default)
-        let fileIds = 'all';
-        if (State.settings.smartFilter) {
-            const exts = State.settings.filterExts.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
-            if (exts.length > 0) {
-                const extRegex = new RegExp('\\.(' + exts.join('|') + ')$', 'i');
-                const validFiles = files.filter(f => !extRegex.test(f.path));
-                if (validFiles.length > 0) fileIds = validFiles.map(f => f.id).join(',');
-            }
-        }
-        await API.post('/torrents/selectFiles/' + torrentId, { files: fileIds });
-        addToHistory({ type: 'success', name: 'Magnet Added', url: '#', size: 'Pending' });
-        if (!State.queueProcessing) UI.showToast('Magnet Added Successfully!');
-        finishMagnetAdd(callback);
+        await TorrentPicker.open(torrentId, callback, files, title);
     }
 
-    // --- Torrent file selector modal ---
+    async function playTorrentVideos(torrent) {
+        if (!torrent.links || !torrent.links.length) {
+            UI.showToast('No files ready to play', 'error');
+            return;
+        }
+        const videoExts = /\.(mp4|mkv|avi|mov|webm|mp3|flac|wav)$/i;
+        const mediaLinks = torrent.links.filter((u) => videoExts.test(u));
+        if (!mediaLinks.length) {
+            UI.showToast('No playable media in torrent', 'error');
+            return;
+        }
+        UI.showToast('Preparing playlist...');
+        const playlist = [];
+        for (const link of mediaLinks) {
+            const name = link.split('/').pop() || torrent.filename;
+            const resolved = await resolvePlayableUrl(link, name);
+            playlist.push({ url: resolved.url, filename: name, mode: resolved.mode });
+        }
+        if (playlist.length && typeof Media !== 'undefined') {
+            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode);
+        }
+    }
 
-    function showTorrentSelectorModal(torrentId, files, title, callback) {
-        const container = DOM.create('div', { style: 'display:flex;flex-direction:column;gap:10px;max-height:60vh;' });
+    async function deleteAllCloudItems() {
+        const { ok, error } = await API.deleteAllDownloads();
+        if (ok) {
+            State.cachedCloud = [];
+            GM_setValue('rd_cached_cloud', '[]');
+            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.render();
+            UI.showToast('All cloud items deleted');
+        } else {
+            UI.showToast('Delete failed: ' + error, 'error');
+        }
+    }
 
-        const headerRow = DOM.create('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px;' });
-        const selectAllBtn = DOM.create('button', { textContent: 'Select All', className: 'rd-input-btn' });
-        const selectNoneBtn = DOM.create('button', { textContent: 'Select None', className: 'rd-input-btn' });
-        headerRow.append(selectAllBtn, selectNoneBtn);
-        container.append(headerRow);
+    async function deleteAllTorrentItems() {
+        const { ok, error } = await API.deleteAllTorrents();
+        if (ok) {
+            State.cachedTorrents = [];
+            GM_setValue('rd_cached_torrents', '[]');
+            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
+            UI.showToast('All torrents deleted');
+        } else {
+            UI.showToast('Delete failed: ' + error, 'error');
+        }
+    }
 
-        const fileList = DOM.create('div', { style: 'overflow-y:auto;max-height:50vh;display:flex;flex-direction:column;gap:4px;' });
-        const checkboxes = [];
-
-        files.forEach(f => {
-            const row = DOM.create('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--rd-radius-xs);cursor:pointer;font-size:13px;' });
-            const cb = DOM.create('input', { type: 'checkbox', checked: true, style: 'flex-shrink:0;' });
-            cb.dataset.fileId = f.id;
-            checkboxes.push(cb);
-
-            const parts = f.path.split('/');
-            const fileName = parts.pop();
-            const folderPrefix = parts.length > 0 ? parts.join('/') + '/' : '';
-
-            const label = DOM.create('span');
-            if (folderPrefix) label.append(DOM.create('span', { textContent: folderPrefix, style: 'opacity:0.5;' }));
-            label.append(DOM.create('span', { textContent: fileName, style: 'font-weight:bold;' }));
-
-            row.append(cb, label, DOM.create('span', {
-                textContent: formatBytes(f.bytes),
-                style: 'margin-left:auto;opacity:0.6;font-size:12px;white-space:nowrap;'
-            }));
-            fileList.append(row);
-        });
-
-        container.append(fileList);
-
-        selectAllBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = true; }));
-        selectNoneBtn.addEventListener('click', () => checkboxes.forEach(cb => { cb.checked = false; }));
-
-        const cancelBtn = DOM.create('button', { textContent: 'Cancel', className: 'rd-input-btn' });
-        const startBtn = DOM.create('button', { textContent: 'Start Download', className: 'rd-input-btn primary' });
-        const modal = UI.showModal(title, [container], [cancelBtn, startBtn]);
-
-        cancelBtn.addEventListener('click', () => {
-            modal.close();
-            API.del('/torrents/delete/' + torrentId);
-        });
-
-        startBtn.addEventListener('click', async () => {
-            const selectedIds = checkboxes.filter(cb => cb.checked).map(cb => cb.dataset.fileId);
-            if (selectedIds.length === 0) {
-                UI.showToast('Select at least one file', 'error');
-                return;
-            }
-            await API.post('/torrents/selectFiles/' + torrentId, { files: selectedIds.join(',') });
-            addToHistory({ type: 'success', name: title, url: '#', size: selectedIds.length + ' files' });
-            UI.showToast('Torrent started with ' + selectedIds.length + ' files!');
-            modal.close();
-            finishMagnetAdd(callback);
-        });
+    async function renameCloudItem(id, newName) {
+        const { ok, error } = await API.renameDownload(id, newName);
+        if (ok) {
+            const item = State.cachedCloud.find((c) => c.id === id);
+            if (item) item.filename = newName;
+            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            UI.showToast('Renamed');
+        } else {
+            UI.showToast('Rename failed: ' + error, 'error');
+        }
     }
 
     // --- Queue processing with parallel concurrency ---

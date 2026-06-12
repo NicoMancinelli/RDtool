@@ -40,7 +40,7 @@
                 const headers = { 'Authorization': 'Bearer ' + State.apiKey };
                 let body = undefined;
 
-                if (method === 'POST' && data) {
+                if ((method === 'POST' || method === 'PUT') && data) {
                     headers['Content-Type'] = 'application/x-www-form-urlencoded';
                     body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
                 }
@@ -110,7 +110,71 @@
             return this.request('DELETE', endpoint);
         },
 
-        upload(endpoint, file) {
+        put(endpoint, data) {
+            return this.request('PUT', endpoint, data);
+        },
+
+        _torrentHostCache: null,
+
+        async resolveTorrentHost() {
+            if (this._torrentHostCache) return this._torrentHostCache;
+            const res = await this.getTorrentsAvailableHosts();
+            if (res.ok && res.data) {
+                const hosts = Object.keys(res.data);
+                this._torrentHostCache = hosts[0] || '';
+            } else {
+                this._torrentHostCache = '';
+            }
+            return this._torrentHostCache;
+        },
+
+        getStreamingTranscode(id) {
+            return this.get('/streaming/transcode/' + id);
+        },
+
+        getStreamingMediaInfos(id) {
+            return this.get('/streaming/mediaInfos/' + id);
+        },
+
+        getHostsRegex() {
+            return this.get('/hosts/regex');
+        },
+
+        getHostsRegexFolder() {
+            return this.get('/hosts/regexFolder');
+        },
+
+        getTorrentsActiveCount() {
+            return this.get('/torrents/activeCount');
+        },
+
+        getTorrentsAvailableHosts() {
+            return this.get('/torrents/availableHosts');
+        },
+
+        deleteAllDownloads() {
+            return this.del('/downloads/deleteAll');
+        },
+
+        deleteAllTorrents() {
+            return this.del('/torrents/deleteAll');
+        },
+
+        getDownloadsPage(limit, page) {
+            const l = limit || 100;
+            const p = page || 1;
+            return this.get('/downloads?limit=' + l + '&page=' + p);
+        },
+
+        renameDownload(id, newFilename) {
+            return this.put('/downloads/rename/' + id, { newFilename: newFilename });
+        },
+
+        getTrafficDetails() {
+            return this.get('/traffic/details');
+        },
+
+        upload(endpoint, file, _retried) {
             if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
 
             return this._enqueue(() => new Promise((resolve) => {
@@ -150,6 +214,19 @@
                             if (status === 401 || status === 403) {
                                 Config.clearKey();
                                 return resolve({ ok: false, error: 'Auth Error' });
+                            }
+
+                            if (status === 429 && !_retried) {
+                                const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
+                                return setTimeout(() => {
+                                    this.upload(endpoint, file, true).then(resolve);
+                                }, retryAfter * 1000);
+                            }
+
+                            if (status === 503 && !_retried) {
+                                return setTimeout(() => {
+                                    this.upload(endpoint, file, true).then(resolve);
+                                }, 2000);
                             }
 
                             if (status >= 400) {

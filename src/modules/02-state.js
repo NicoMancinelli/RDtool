@@ -38,7 +38,14 @@
         unrestrictCache: new Map(),
         linkCheckCache: new Map(),
         pageCollapsedDomains: new Set(),
-        torrentStatusFilter: 'all'
+        torrentStatusFilter: 'all',
+        pageLinkCache: new Map(),
+        cloudPage: 1,
+        cloudHasMore: false,
+        activeTorrentCount: null,
+        apiHostRegex: null,
+        apiHostRegexFolder: null,
+        trafficDetails: null
     };
 
     // =========================================================================
@@ -50,10 +57,7 @@
 
     // Validate and load settings
     const savedSettings = JSON.parse(GM_getValue('rd_settings', '{}'));
-    State.settings = {};
-    for (const key of Object.keys(Config.defaultSettings)) {
-        State.settings[key] = savedSettings.hasOwnProperty(key) ? savedSettings[key] : Config.defaultSettings[key];
-    }
+    State.settings = migrateSettings(savedSettings);
 
     if (State.settings.rememberLastTab) {
         const lastTab = GM_getValue('rd_last_tab', 'links');

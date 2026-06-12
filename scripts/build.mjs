@@ -7,9 +7,33 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const srcDir = join(root, 'src');
 const distDir = join(root, 'dist');
-const configPath = join(srcDir, 'modules', '01-config.js');
+const modulesDir = join(srcDir, 'modules');
+const configPath = join(modulesDir, '01-config.js');
 const headerPath = join(srcDir, 'userscript-header.txt');
 const pkgPath = join(root, 'package.json');
+
+const MODULE_ORDER = [
+    '01-config.js',
+    '02-state.js',
+    '03-utils.js',
+    '04-api.js',
+    '05-dom.js',
+    '05b-list-renderer.js',
+    '06-ui.js',
+    '07-core.js',
+    '07b-torrent-picker.js',
+    'tabs/00-index.js',
+    'tabs/shared.js',
+    'tabs/links.js',
+    'tabs/page.js',
+    'tabs/torrents.js',
+    'tabs/cloud.js',
+    'tabs/settings.js',
+    '09-scanner.js',
+    '10-media.js',
+    '11-mobile.js',
+    '12-init.js'
+];
 
 function readConfigVersion() {
     const configText = readFileSync(configPath, 'utf8');
@@ -38,6 +62,30 @@ function syncPackageJsonVersion(version) {
     console.log(`Synced package.json version to ${semver}`);
 }
 
+function collectModules() {
+    const ordered = [];
+    const seen = new Set();
+    for (const rel of MODULE_ORDER) {
+        const path = join(modulesDir, rel);
+        try {
+            readFileSync(path, 'utf8');
+            ordered.push(rel);
+            seen.add(rel);
+        } catch {
+            // Optional module not yet added
+        }
+    }
+    // Append any other root-level .js modules not in order (excluding 08-tabs.js legacy)
+    const rootFiles = readdirSync(modulesDir).filter((f) => f.endsWith('.js') && f !== '08-tabs.js').sort();
+    for (const f of rootFiles) {
+        if (!seen.has(f)) {
+            ordered.push(f);
+            seen.add(f);
+        }
+    }
+    return ordered;
+}
+
 mkdirSync(distDir, { recursive: true });
 
 const version = readConfigVersion();
@@ -48,9 +96,7 @@ header = syncUserscriptHeaderVersion(header, version);
 writeFileSync(headerPath, header);
 const css = readFileSync(join(srcDir, 'styles.css'), 'utf8');
 
-const modulesDir = join(srcDir, 'modules');
-const modules = readdirSync(modulesDir).filter((f) => f.endsWith('.js')).sort();
-
+const modules = collectModules();
 const styleBlock = `// --- Step 1: CSS via GM_addStyle ---\nGM_addStyle(\`${css}\`);\n`;
 const body = modules.map((f) => readFileSync(join(modulesDir, f), 'utf8')).join('\n\n');
 const iife = `(function() {\n'use strict';\n\n${styleBlock}\n${body}\n})();\n`;

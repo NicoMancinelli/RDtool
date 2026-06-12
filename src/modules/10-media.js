@@ -4,11 +4,12 @@ const Media = {
     _playlistIndex: 0,
     _keyHandler: null,
 
-    open(url, filename, playlist = null) {
-        this.close(); // Clean up any existing player
+    open(url, filename, playlist = null, mode = 'direct') {
+        this.close();
 
-        this._playlist = playlist; // Array of { url, filename } or null
+        this._playlist = playlist;
         this._playlistIndex = 0;
+        this._playMode = mode;
 
         const win = DOM.create('div', { id: 'rd-media-window' });
 
@@ -57,8 +58,17 @@ const Media = {
             onClick: () => this.close()
         }));
 
+        const titleChildren = [
+            DOM.create('span', { style: 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;', textContent: filename })
+        ];
+        if (mode === 'transcode') {
+            titleChildren.push(DOM.create('span', {
+                textContent: 'Transcode',
+                style: 'font-size:9px;background:var(--rd-warning);color:var(--rd-bg-base);padding:2px 6px;border-radius:6px;margin-left:6px;'
+            }));
+        }
         const header = DOM.create('div', { id: 'rd-media-drag-handle' }, [
-            DOM.create('span', { style: 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;', textContent: filename }),
+            DOM.create('div', { style: 'display:flex;align-items:center;flex:1;min-width:0;' }, titleChildren),
             controls
         ]);
         win.append(header);
@@ -95,7 +105,13 @@ const Media = {
         } else {
             const fallback = DOM.create('div', { style: 'padding:24px; text-align:center;' });
             fallback.append(
-                DOM.create('div', { textContent: 'Format not natively supported.' }),
+                DOM.create('div', { textContent: 'Format not natively supported in browser.' }),
+                DOM.create('button', {
+                    className: 'rd-input-btn primary',
+                    textContent: 'Open in External Player',
+                    style: 'margin-top:12px;',
+                    onClick: () => window.open(getStreamUrl(url), '_self')
+                }),
                 DOM.create('a', { href: url, target: '_blank', style: 'color:var(--rd-accent); margin-top:12px; display:inline-block; font-weight:bold;', textContent: 'Download File' })
             );
             win.append(fallback);

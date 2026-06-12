@@ -26,6 +26,18 @@ const Scanner = {
             if (ok && data) State.liveHosts = data;
         });
 
+        if (State.settings.useApiHostRegex) {
+            API.getHostsRegex().then(({ ok, data }) => {
+                if (ok && data && data.regex) {
+                    State.apiHostRegex = data.regex;
+                    Config.hostRegex = Config.getActiveRegex();
+                }
+            });
+            API.getHostsRegexFolder().then(({ ok, data }) => {
+                if (ok && data && data.regex) State.apiHostRegexFolder = data.regex;
+            });
+        }
+
         // MutationObserver
         this._observer = new MutationObserver(() => {
             if (document.hidden) return;
@@ -147,6 +159,7 @@ const Scanner = {
         const icon = DOM.create('span', {
             className: 'rd-inline-icon ' + extraClass,
             textContent: text,
+            dataset: { linkUrl: linkUrl || '' },
             title: extraClass === 'error' ? '' : 'Unrestrict (Right-click to copy)',
             onClick: (e) => { e.preventDefault(); e.stopPropagation(); handler(); },
             onContextmenu: (e) => {
@@ -169,6 +182,31 @@ const Scanner = {
 
         target.parentNode.insertBefore(icon, target.nextSibling);
 
+        if (State.isMobile && extraClass !== 'error' && linkUrl) {
+            addMobileLongPress(icon, [{
+                label: 'File info',
+                action: async () => {
+                    if (linkUrl.startsWith('magnet:')) {
+                        UI.showToast(icon.dataset.cache || 'Checking cache...');
+                        return;
+                    }
+                    let info = State.linkCheckCache.get(linkUrl);
+                    if (!info) {
+                        const { ok, data } = await API.post('/unrestrict/check', { link: linkUrl });
+                        if (ok && data && data.supported) {
+                            info = data.filename + ' \u2014 ' + (data.filesize ? formatBytes(data.filesize) : 'Unknown');
+                            State.linkCheckCache.set(linkUrl, info);
+                            State.pageLinkCache.set(linkUrl, 'cached');
+                        } else {
+                            info = 'Unsupported or uncached';
+                            State.pageLinkCache.set(linkUrl, 'uncached');
+                        }
+                    }
+                    UI.showModal('Link Info', [DOM.create('div', { textContent: info, style: 'font-size:13px;' })], []);
+                }
+            }]);
+        }
+
         // Magnet tooltip
         if (text === '\u{1F9F2}') {
             icon.addEventListener('mouseenter', () => { if (icon.dataset.cache) this._showTooltip(icon, icon.dataset.cache); });
@@ -182,7 +220,7 @@ const Scanner = {
         const hashMatch = magnetLink.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
         if (!hashMatch) return;
         const hash = hashMatch[1].toLowerCase();
-        State.magnetCacheQueue.push({ hash, el: iconElement });
+        State.magnetCacheQueue.push({ hash, el: iconElement, magnet: magnetLink });
 
         clearTimeout(State.cacheCheckTimer);
         State.cacheCheckTimer = setTimeout(async () => {
@@ -194,14 +232,17 @@ const Scanner = {
             if (!ok || !data) return;
             batch.forEach(item => {
                 const hostData = data[item.hash];
+                const magnetUrl = item.magnet || item.el.dataset.linkUrl || '';
                 if (hostData && hostData.rd && hostData.rd.length > 0) {
                     item.el.classList.add('cached');
-                    item.el.textContent = '\u{1F7E2} \u{1F9F2}'; // green circle + magnet
+                    item.el.textContent = '\u{1F7E2} \u{1F9F2}';
                     item.el.dataset.cache = 'Cached';
+                    if (magnetUrl) State.pageLinkCache.set(magnetUrl, 'cached');
                 } else {
                     item.el.classList.add('uncached');
-                    item.el.textContent = '\u{1F7E1} \u{1F9F2}'; // yellow circle + magnet
+                    item.el.textContent = '\u{1F7E1} \u{1F9F2}';
                     item.el.dataset.cache = 'Uncached';
+                    if (magnetUrl) State.pageLinkCache.set(magnetUrl, 'uncached');
                 }
             });
         }, 500);

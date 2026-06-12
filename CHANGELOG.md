@@ -4,6 +4,33 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [40.0] - 2026-06-10
+
+### Added
+
+- **v40 capstone** — complete torrent workflow, honest Page cache state, RD streaming playback, cloud scale, mobile parity
+- Shared `TorrentPicker` modal — magnets, `.torrent` upload, and `waiting_files_selection` torrents
+- Torrents **Add** panel — paste magnet, upload `.torrent`, Delete All
+- **Play** from completed torrents (playlist with transcode fallback)
+- Page tab **cache badges** (Cached / Uncached / Unknown / Host down) and batch host link checks
+- **ListRenderer** — incremental list updates for Torrents, Cloud, and Links history (preserves scroll/selection on poll)
+- Cloud **pagination** with Load More, rename, Delete All
+- RD **streaming transcode** in media player with Transcode badge
+- Header **quota chip** — premium days, daily quota %, active torrent count
+- API v2 wrappers — streaming, hosts regex, pagination, bulk delete, traffic details
+- Settings export **API key opt-in** (default off)
+- Inline API key validation on setup (no reload on bad key)
+- Mobile long-press on Page/Torrent/Cloud rows and inline link x-ray
+- Vitest unit tests + CI `npm test`
+
+### Changed
+
+- Split monolithic `08-tabs.js` into `src/modules/tabs/*` with explicit build order
+- `addMagnet` / torrent upload pass `host` from `/torrents/availableHosts`
+- Optional API `/hosts/regex` for link detection (`useApiHostRegex` setting)
+- `defaultAction: 'list'` now only adds to history (no download/copy)
+- Settings migration via `migrateSettings()`
+
 ## [38.9] - 2026-06-10
 
 ### Added

@@ -1,6 +1,6 @@
 # RDtool Manual Test Matrix
 
-RDtool is a Tampermonkey userscript — automated unit tests are limited. Run this checklist before each release.
+RDtool is a Tampermonkey userscript. Run `npm test` for unit tests, then this checklist before each release.
 
 ## Setup
 
@@ -122,6 +122,23 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] None clears selection on Page/Torrents/Cloud
 - [ ] Clear Session Caches resets unrestrict/x-ray caches
 - [ ] Page domain groups stay collapsed when re-scanning
+
+## v40 Features
+
+- [ ] Drag `.torrent` onto dashboard → upload → file picker → download starts
+- [ ] Torrents Add panel: paste magnet and upload `.torrent`
+- [ ] Torrent in `waiting_files_selection` shows Pick Files button
+- [ ] Play on completed torrent builds playlist (transcode for mkv)
+- [ ] Page tab shows Cached/Uncached badges; Select Uncached works for host links
+- [ ] Torrent poll does not reset scroll/checkboxes when data unchanged
+- [ ] Cloud Load More fetches next page; Rename works
+- [ ] Cloud/Torrent Delete All requires typing DELETE ALL
+- [ ] Header quota chip shows days left and active torrent count
+- [ ] Invalid API key on setup does not reload page
+- [ ] Settings export asks before including API key
+- [ ] Mobile long-press on torrent/cloud/page rows shows context menu
+- [ ] Mobile long-press on inline ⚡ shows file info modal
+- [ ] `npm test` passes in CI
 
 ## Regression Checks (v37.1 / v38.0)
 

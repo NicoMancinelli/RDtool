@@ -1,6 +1,6 @@
 {
   "name": "rdtool",
-  "version": "38.9.0",
+  "version": "40.0.0",
   "description": "Real-Debrid Suite Tampermonkey userscript",
   "private": true,
   "type": "module",
@@ -8,11 +8,13 @@
     "split": "node scripts/split-source.mjs",
     "build": "node scripts/build.mjs",
     "lint": "eslint src/",
+    "test": "vitest run",
     "rebuild": "npm run split && npm run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",
     "eslint": "^9.28.0",
-    "globals": "^16.2.0"
+    "globals": "^16.2.0",
+    "vitest": "^3.2.4"
   }
 }
