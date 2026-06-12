@@ -218,6 +218,44 @@
             container.appendChild(card);
         },
 
+        switchTab(key) {
+            const valid = ['links', 'page', 'torrents', 'cloud', 'settings'];
+            if (!valid.includes(key)) return;
+
+            if (State.currentTab === 'torrents' && key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+                Tabs.Torrents.stopPolling();
+            }
+
+            State.currentTab = key;
+            if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', key);
+
+            const tabsEl = document.querySelector('.rd-tabs');
+            if (tabsEl) {
+                tabsEl.querySelectorAll('.rd-tab').forEach(tb => {
+                    tb.classList.toggle('active', tb.dataset.tab === key);
+                });
+            }
+
+            if (key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                Tabs.Torrents.startPolling();
+            }
+
+            const capKey = key.charAt(0).toUpperCase() + key.slice(1);
+            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+                Tabs[capKey].render();
+            }
+        },
+
+        openTab(key, after) {
+            if (!State.isExpanded) {
+                State.currentTab = key;
+                this.toggleDashboard(true);
+            } else if (State.currentTab !== key) {
+                this.switchTab(key);
+            }
+            if (after) after();
+        },
+
         toggleDashboard(show) {
             const container = document.getElementById('rd-ui-container');
             if (!container) return;
@@ -335,41 +373,7 @@
                 const tab = DOM.create('div', {
                     className: 'rd-tab' + (State.currentTab === t.key ? ' active' : ''),
                     dataset: { tab: t.key },
-                    onClick: () => {
-                        // Stop torrent polling when leaving torrents tab
-                        if (State.currentTab === 'torrents' && t.key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
-                            Tabs.Torrents.stopPolling();
-                        }
-
-                        State.currentTab = t.key;
-                        if (State.settings.rememberLastTab) {
-                            GM_setValue('rd_last_tab', t.key);
-                        }
-
-                        // Update active class on all tabs
-                        tabs.querySelectorAll('.rd-tab').forEach(tb => tb.classList.remove('active'));
-                        tab.classList.add('active');
-
-                        // Start torrent polling when entering torrents tab
-                        if (t.key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
-                            Tabs.Torrents.startPolling();
-                        }
-
-                        // Render tab content
-                        const capKey = t.key.charAt(0).toUpperCase() + t.key.slice(1);
-                        if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
-                            Tabs[capKey].render();
-                        } else {
-                            const content = document.getElementById('rd-content-area');
-                            if (content) {
-                                DOM.clear(content);
-                                content.appendChild(DOM.create('div', {
-                                    style: 'padding:40px;text-align:center;color:var(--rd-text-secondary);font-size:12px;',
-                                    textContent: 'Tab "' + capKey + '" not loaded yet.'
-                                }));
-                            }
-                        }
-                    }
+                    onClick: () => UI.switchTab(t.key)
                 }, tabChildren);
                 tabs.appendChild(tab);
             });

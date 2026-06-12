@@ -113,6 +113,10 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Switch to Torrents on Magnet jumps to Torrents after add
 - [ ] Open Dashboard on Page Magnet shows UI on inline magnet click
 - [ ] Notify on Queue Complete shows notification when batch finishes
+- [ ] Cache Unrestrict Results skips API on repeat host link (same session)
+- [ ] Queue Concurrency and Cloud History Limit settings apply
+- [ ] Invert works on Torrents and Cloud tabs
+- [ ] Tab switches from inline icons do not flash/rebuild entire dashboard
 
 ## Regression Checks (v37.1 / v38.0)
 

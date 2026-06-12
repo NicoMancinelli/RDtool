@@ -25,15 +25,10 @@ const Scanner = {
         });
 
         // MutationObserver
-        this._observer = new MutationObserver((mutations) => {
-            if (mutations.some(m => m.addedNodes.length)) {
-                clearTimeout(this._scanTimer);
-                if (typeof requestIdleCallback !== 'undefined') {
-                    requestIdleCallback(() => this.scanPage());
-                } else {
-                    this._scanTimer = setTimeout(() => this.scanPage(), 300);
-                }
-            }
+        this._observer = new MutationObserver(() => {
+            if (document.hidden) return;
+            clearTimeout(this._scanTimer);
+            this._scanTimer = setTimeout(() => this.scanPage(), 300);
         });
         this._observer.observe(document.body, { childList: true, subtree: true });
 
@@ -104,10 +99,7 @@ const Scanner = {
                     this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
                 } else {
                     const icon = this.injectIcon(link, '\u26A1', () => {
-                        UI.toggleDashboard(true);
-                        State.currentTab = 'links';
-                        UI.renderDashboard();
-                        unrestrictLinkOrFolder(url);
+                        UI.openTab('links', () => unrestrictLinkOrFolder(url));
                     }, url);
                     // X-ray tooltip on hover
                     this._setupXray(icon, url);
@@ -116,10 +108,7 @@ const Scanner = {
                         link.addEventListener('click', (e) => {
                             if (!e.ctrlKey && !e.metaKey) {
                                 e.preventDefault();
-                                UI.toggleDashboard(true);
-                                State.currentTab = 'links';
-                                UI.renderDashboard();
-                                unrestrictLinkOrFolder(url);
+                                UI.openTab('links', () => unrestrictLinkOrFolder(url));
                             }
                         });
                     }
@@ -204,6 +193,10 @@ const Scanner = {
         let timer;
         icon.addEventListener('mouseenter', () => {
             if (icon.dataset.xray) return this._showTooltip(icon, icon.dataset.xray);
+            if (State.linkCheckCache.has(url)) {
+                icon.dataset.xray = State.linkCheckCache.get(url);
+                return this._showTooltip(icon, icon.dataset.xray);
+            }
             timer = setTimeout(async () => {
                 const ogText = icon.textContent;
                 icon.textContent = '\u23F3';
@@ -215,6 +208,7 @@ const Scanner = {
                 } else {
                     icon.dataset.xray = 'Unsupported';
                 }
+                State.linkCheckCache.set(url, icon.dataset.xray);
                 this._showTooltip(icon, icon.dataset.xray);
             }, 500);
         });
@@ -241,8 +235,11 @@ const Scanner = {
     },
 
     _initSelectionTooltip() {
+        let selTimer;
         document.addEventListener('selectionchange', () => {
             if (!State.apiKey) return;
+            clearTimeout(selTimer);
+            selTimer = setTimeout(() => {
             const sel = window.getSelection();
             const rawText = (sel.toString() || '').trim();
             const decoded = decodeBase64Heuristic(rawText);
@@ -260,6 +257,7 @@ const Scanner = {
             } else {
                 selTooltip.classList.remove('show');
             }
+            }, 150);
         });
 
         // Click handler for selection tooltip
@@ -268,10 +266,7 @@ const Scanner = {
             if (selTooltip && e.target.closest('#rd-sel-tooltip')) {
                 const content = selTooltip.dataset.content;
                 if (content) {
-                    if (!State.isExpanded) UI.toggleDashboard(true);
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
-                    handleManualInput(content);
+                    UI.openTab('links', () => handleManualInput(content));
                     selTooltip.classList.remove('show');
                 }
             }

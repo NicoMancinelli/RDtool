@@ -34,7 +34,9 @@
         sessionStats: { processed: 0 },
         linksHistoryFilter: '',
         linksHistoryTypeFilter: 'all',
-        lastUrl: location.href
+        lastUrl: location.href,
+        unrestrictCache: new Map(),
+        linkCheckCache: new Map()
     };
 
     // =========================================================================

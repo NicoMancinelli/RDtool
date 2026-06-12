@@ -4,6 +4,24 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.8] - 2026-06-10
+
+### Added
+
+- `UI.switchTab()` / `UI.openTab()` — lightweight tab switches without rebuilding the full dashboard
+- Session unrestrict cache (toggleable) — skips repeat API calls for the same host link
+- X-ray hover cache — avoids duplicate `/unrestrict/check` calls per URL
+- Queue concurrency setting (1–8 workers)
+- Cloud history limit setting (50–500 items)
+- Invert selection on Torrents and Cloud tabs
+
+### Changed
+
+- Scanner uses debounced mutations only (300ms), skips scans when tab is hidden
+- Selection tooltip debounced (150ms) to reduce work on text selection
+- M3U generation uses parallel unrestrict (2 workers)
+- Inline link / magnet actions use `openTab` instead of full `renderDashboard` rebuilds
+
 ## [38.7] - 2026-06-10
 
 ### Added

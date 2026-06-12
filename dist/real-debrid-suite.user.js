@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.7
+// @version      38.8
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,7 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.7',
+        VERSION: '38.8',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -846,7 +846,10 @@ GM_addStyle(`:root {
             rememberDashboardOpen: false,
             switchToTorrentsOnMagnet: false,
             openDashboardOnMagnet: false,
-            torrentPollInterval: '4'
+            torrentPollInterval: '4',
+            queueConcurrency: '3',
+            cloudLimit: '100',
+            useUnrestrictCache: true
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -957,7 +960,9 @@ GM_addStyle(`:root {
         sessionStats: { processed: 0 },
         linksHistoryFilter: '',
         linksHistoryTypeFilter: 'all',
-        lastUrl: location.href
+        lastUrl: location.href,
+        unrestrictCache: new Map(),
+        linkCheckCache: new Map()
     };
 
     // =========================================================================
@@ -1510,6 +1515,44 @@ GM_addStyle(`:root {
             container.appendChild(card);
         },
 
+        switchTab(key) {
+            const valid = ['links', 'page', 'torrents', 'cloud', 'settings'];
+            if (!valid.includes(key)) return;
+
+            if (State.currentTab === 'torrents' && key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+                Tabs.Torrents.stopPolling();
+            }
+
+            State.currentTab = key;
+            if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', key);
+
+            const tabsEl = document.querySelector('.rd-tabs');
+            if (tabsEl) {
+                tabsEl.querySelectorAll('.rd-tab').forEach(tb => {
+                    tb.classList.toggle('active', tb.dataset.tab === key);
+                });
+            }
+
+            if (key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                Tabs.Torrents.startPolling();
+            }
+
+            const capKey = key.charAt(0).toUpperCase() + key.slice(1);
+            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+                Tabs[capKey].render();
+            }
+        },
+
+        openTab(key, after) {
+            if (!State.isExpanded) {
+                State.currentTab = key;
+                this.toggleDashboard(true);
+            } else if (State.currentTab !== key) {
+                this.switchTab(key);
+            }
+            if (after) after();
+        },
+
         toggleDashboard(show) {
             const container = document.getElementById('rd-ui-container');
             if (!container) return;
@@ -1627,41 +1670,7 @@ GM_addStyle(`:root {
                 const tab = DOM.create('div', {
                     className: 'rd-tab' + (State.currentTab === t.key ? ' active' : ''),
                     dataset: { tab: t.key },
-                    onClick: () => {
-                        // Stop torrent polling when leaving torrents tab
-                        if (State.currentTab === 'torrents' && t.key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
-                            Tabs.Torrents.stopPolling();
-                        }
-
-                        State.currentTab = t.key;
-                        if (State.settings.rememberLastTab) {
-                            GM_setValue('rd_last_tab', t.key);
-                        }
-
-                        // Update active class on all tabs
-                        tabs.querySelectorAll('.rd-tab').forEach(tb => tb.classList.remove('active'));
-                        tab.classList.add('active');
-
-                        // Start torrent polling when entering torrents tab
-                        if (t.key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
-                            Tabs.Torrents.startPolling();
-                        }
-
-                        // Render tab content
-                        const capKey = t.key.charAt(0).toUpperCase() + t.key.slice(1);
-                        if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
-                            Tabs[capKey].render();
-                        } else {
-                            const content = document.getElementById('rd-content-area');
-                            if (content) {
-                                DOM.clear(content);
-                                content.appendChild(DOM.create('div', {
-                                    style: 'padding:40px;text-align:center;color:var(--rd-text-secondary);font-size:12px;',
-                                    textContent: 'Tab "' + capKey + '" not loaded yet.'
-                                }));
-                            }
-                        }
-                    }
+                    onClick: () => UI.switchTab(t.key)
                 }, tabChildren);
                 tabs.appendChild(tab);
             });
@@ -1898,16 +1907,36 @@ GM_addStyle(`:root {
     }
 
     async function unrestrictLink(url, silent = false) {
+        if (State.settings.useUnrestrictCache && State.unrestrictCache.has(url)) {
+            const cached = State.unrestrictCache.get(url);
+            addToHistory({
+                type: 'success', name: cached.name,
+                url: cached.url, download: cached.url,
+                size: cached.size
+            });
+            if (!silent) {
+                if (State.settings.defaultAction === 'dl') window.open(cached.url, '_blank');
+                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(cached.url);
+            }
+            return cached.url;
+        }
+
         const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error, sourceUrl: url });
             return null;
         }
         const dlUrl = data.download;
-        addToHistory({
-            type: 'success', name: data.filename,
-            url: dlUrl, download: dlUrl,
+        const entry = {
+            name: data.filename,
+            url: dlUrl,
             size: formatBytes(data.filesize)
+        };
+        if (State.settings.useUnrestrictCache) State.unrestrictCache.set(url, entry);
+        addToHistory({
+            type: 'success', name: entry.name,
+            url: dlUrl, download: dlUrl,
+            size: entry.size
         });
         if (!silent) {
             if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
@@ -2020,12 +2049,7 @@ GM_addStyle(`:root {
                 State.currentTab = 'torrents';
                 UI.toggleDashboard(true);
             } else if (State.currentTab !== 'torrents') {
-                State.currentTab = 'torrents';
-                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
-                UI.renderDashboard();
-                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
-                    Tabs.Torrents.startPolling();
-                }
+                UI.switchTab('torrents');
             } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
                 Tabs.Torrents.render();
             }
@@ -2177,7 +2201,7 @@ GM_addStyle(`:root {
             return;
         }
 
-        const concurrency = 3;
+        const concurrency = Math.max(1, parseInt(State.settings.queueConcurrency, 10) || 3);
         let completed = 0;
         const total = urls.length;
         const remaining = [...urls];
@@ -2233,12 +2257,21 @@ GM_addStyle(`:root {
     async function generateM3U(name, links) {
         UI.showToast('Generating M3U...');
         let m3u = '#EXTM3U\n';
-        for (const link of links) {
-            const { ok, data } = await API.post('/unrestrict/link', { link });
-            if (ok && data && data.download) {
-                m3u += '#EXTINF:-1,' + data.filename + '\n' + data.download + '\n';
+        const pending = [...links];
+        const lines = [];
+        const worker = async () => {
+            while (pending.length) {
+                const link = pending.shift();
+                if (!link) break;
+                const { ok, data } = await API.post('/unrestrict/link', { link });
+                if (ok && data && data.download) {
+                    lines.push('#EXTINF:-1,' + data.filename + '\n' + data.download);
+                }
             }
-        }
+        };
+        const pool = Math.min(2, links.length);
+        await Promise.all(Array.from({ length: pool }, () => worker()));
+        m3u += lines.join('\n') + (lines.length ? '\n' : '');
         const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
         const url = URL.createObjectURL(blob);
         const a = DOM.create('a', { href: url, download: name.replace(/[^a-z0-9]/gi, '_') + '.m3u' });
@@ -2557,6 +2590,22 @@ GM_addStyle(`:root {
         }
     };
 
+    function makeInvertBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
+            onClick: () => {
+                const boxes = document.querySelectorAll(checkboxSelector);
+                let checked = 0;
+                boxes.forEach(cb => { cb.checked = !cb.checked; if (cb.checked) checked++; });
+                if (selectAllChk) {
+                    selectAllChk.checked = checked === boxes.length;
+                    selectAllChk.indeterminate = checked > 0 && checked < boxes.length;
+                }
+                UI.showToast('Inverted (' + checked + ' selected)');
+            }
+        });
+    }
+
     function makeCopyUrlsBtn(getUrls) {
         return DOM.create('button', {
             className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
@@ -2671,9 +2720,7 @@ GM_addStyle(`:root {
                     queueStatus.style.display = '';
                     queueBtn.textContent = 'Queued ' + sel.length;
                     UI.showToast('Queued ' + sel.length + ' items');
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
-                    processQueue(sel, 'queue');
+                    UI.openTab('links', () => processQueue(sel, 'queue'));
                 }
             });
 
@@ -2747,10 +2794,10 @@ GM_addStyle(`:root {
                         className: 'rd-action-btn rd-page-unrestrict', textContent: 'Queue',
                         dataset: { url: link.url },
                         onClick: () => {
-                            State.currentTab = 'links';
-                            UI.renderDashboard();
-                            if (link.url.startsWith('magnet:')) addMagnet(link.url);
-                            else unrestrictLinkOrFolder(link.url);
+                            UI.openTab('links', () => {
+                                if (link.url.startsWith('magnet:')) addMagnet(link.url);
+                                else unrestrictLinkOrFolder(link.url);
+                            });
                         }
                     });
 
@@ -2806,6 +2853,7 @@ GM_addStyle(`:root {
             });
             leftGroup.append(
                 selectAllLabel,
+                makeInvertBtn('.rd-torrent-chk', selectAllChk),
                 makeCopyUrlsBtn(() => {
                     const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
                     const urls = [];
@@ -2894,7 +2942,7 @@ GM_addStyle(`:root {
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: '1 File',
                         dataset: { link: t.links[0] },
-                        onClick: () => { State.currentTab = 'links'; UI.renderDashboard(); unrestrictLink(t.links[0], false); }
+                        onClick: () => { UI.openTab('links', () => unrestrictLink(t.links[0], false)); }
                     }));
                 } else {
                     actionChildren.push(DOM.create('span', {
@@ -2903,7 +2951,7 @@ GM_addStyle(`:root {
                     }));
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: 'All (' + t.links.length + ')',
-                        onClick: () => { State.currentTab = 'links'; UI.renderDashboard(); processQueue([...t.links], 'queue'); }
+                        onClick: () => { UI.openTab('links', () => processQueue([...t.links], 'queue')); }
                     }));
                 }
             }
@@ -3003,7 +3051,8 @@ GM_addStyle(`:root {
         },
 
         async _fetchCloud() {
-            const { ok, data, error } = await API.get('/downloads?limit=100');
+            const limit = parseInt(State.settings.cloudLimit, 10) || 100;
+            const { ok, data, error } = await API.get('/downloads?limit=' + limit);
             if (State.currentTab !== 'cloud') return;
             if (!ok) {
                 if (loadOfflineData('rd_cached_cloud', 'cachedCloud')) {
@@ -3051,6 +3100,7 @@ GM_addStyle(`:root {
             });
             leftGroup.append(
                 selectAllLabel,
+                makeInvertBtn('.rd-cloud-chk', selectAllChk),
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
                 delSelBtn
             );
@@ -3267,7 +3317,8 @@ GM_addStyle(`:root {
                 { key: 'notificationSound', label: 'Notification Sound' },
                 { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
                 { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
-                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
+                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' },
+                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -3290,6 +3341,14 @@ GM_addStyle(`:root {
                 ['3', '3 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']
             ], () => {
                 if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents) Tabs.Torrents.startPolling();
+            }));
+            wrapper.append(this._buildSelectRow('Queue Concurrency', 'queueConcurrency', [
+                ['1', '1 (safest)'], ['2', '2'], ['3', '3 (default)'], ['5', '5'], ['8', '8 (fastest)']
+            ]));
+            wrapper.append(this._buildSelectRow('Cloud History Limit', 'cloudLimit', [
+                ['50', '50 items'], ['100', '100 items'], ['250', '250 items'], ['500', '500 items']
+            ], () => {
+                if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
             }));
 
             // Text inputs
@@ -3452,15 +3511,10 @@ const Scanner = {
         });
 
         // MutationObserver
-        this._observer = new MutationObserver((mutations) => {
-            if (mutations.some(m => m.addedNodes.length)) {
-                clearTimeout(this._scanTimer);
-                if (typeof requestIdleCallback !== 'undefined') {
-                    requestIdleCallback(() => this.scanPage());
-                } else {
-                    this._scanTimer = setTimeout(() => this.scanPage(), 300);
-                }
-            }
+        this._observer = new MutationObserver(() => {
+            if (document.hidden) return;
+            clearTimeout(this._scanTimer);
+            this._scanTimer = setTimeout(() => this.scanPage(), 300);
         });
         this._observer.observe(document.body, { childList: true, subtree: true });
 
@@ -3531,10 +3585,7 @@ const Scanner = {
                     this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
                 } else {
                     const icon = this.injectIcon(link, '\u26A1', () => {
-                        UI.toggleDashboard(true);
-                        State.currentTab = 'links';
-                        UI.renderDashboard();
-                        unrestrictLinkOrFolder(url);
+                        UI.openTab('links', () => unrestrictLinkOrFolder(url));
                     }, url);
                     // X-ray tooltip on hover
                     this._setupXray(icon, url);
@@ -3543,10 +3594,7 @@ const Scanner = {
                         link.addEventListener('click', (e) => {
                             if (!e.ctrlKey && !e.metaKey) {
                                 e.preventDefault();
-                                UI.toggleDashboard(true);
-                                State.currentTab = 'links';
-                                UI.renderDashboard();
-                                unrestrictLinkOrFolder(url);
+                                UI.openTab('links', () => unrestrictLinkOrFolder(url));
                             }
                         });
                     }
@@ -3631,6 +3679,10 @@ const Scanner = {
         let timer;
         icon.addEventListener('mouseenter', () => {
             if (icon.dataset.xray) return this._showTooltip(icon, icon.dataset.xray);
+            if (State.linkCheckCache.has(url)) {
+                icon.dataset.xray = State.linkCheckCache.get(url);
+                return this._showTooltip(icon, icon.dataset.xray);
+            }
             timer = setTimeout(async () => {
                 const ogText = icon.textContent;
                 icon.textContent = '\u23F3';
@@ -3642,6 +3694,7 @@ const Scanner = {
                 } else {
                     icon.dataset.xray = 'Unsupported';
                 }
+                State.linkCheckCache.set(url, icon.dataset.xray);
                 this._showTooltip(icon, icon.dataset.xray);
             }, 500);
         });
@@ -3668,8 +3721,11 @@ const Scanner = {
     },
 
     _initSelectionTooltip() {
+        let selTimer;
         document.addEventListener('selectionchange', () => {
             if (!State.apiKey) return;
+            clearTimeout(selTimer);
+            selTimer = setTimeout(() => {
             const sel = window.getSelection();
             const rawText = (sel.toString() || '').trim();
             const decoded = decodeBase64Heuristic(rawText);
@@ -3687,6 +3743,7 @@ const Scanner = {
             } else {
                 selTooltip.classList.remove('show');
             }
+            }, 150);
         });
 
         // Click handler for selection tooltip
@@ -3695,10 +3752,7 @@ const Scanner = {
             if (selTooltip && e.target.closest('#rd-sel-tooltip')) {
                 const content = selTooltip.dataset.content;
                 if (content) {
-                    if (!State.isExpanded) UI.toggleDashboard(true);
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
-                    handleManualInput(content);
+                    UI.openTab('links', () => handleManualInput(content));
                     selTooltip.classList.remove('show');
                 }
             }

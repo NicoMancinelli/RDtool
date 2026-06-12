@@ -23,16 +23,36 @@
     }
 
     async function unrestrictLink(url, silent = false) {
+        if (State.settings.useUnrestrictCache && State.unrestrictCache.has(url)) {
+            const cached = State.unrestrictCache.get(url);
+            addToHistory({
+                type: 'success', name: cached.name,
+                url: cached.url, download: cached.url,
+                size: cached.size
+            });
+            if (!silent) {
+                if (State.settings.defaultAction === 'dl') window.open(cached.url, '_blank');
+                else if (State.settings.defaultAction === 'copy') UI.copyToClipboard(cached.url);
+            }
+            return cached.url;
+        }
+
         const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
         if (!ok) {
             addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error, sourceUrl: url });
             return null;
         }
         const dlUrl = data.download;
-        addToHistory({
-            type: 'success', name: data.filename,
-            url: dlUrl, download: dlUrl,
+        const entry = {
+            name: data.filename,
+            url: dlUrl,
             size: formatBytes(data.filesize)
+        };
+        if (State.settings.useUnrestrictCache) State.unrestrictCache.set(url, entry);
+        addToHistory({
+            type: 'success', name: entry.name,
+            url: dlUrl, download: dlUrl,
+            size: entry.size
         });
         if (!silent) {
             if (State.settings.defaultAction === 'dl') window.open(dlUrl, '_blank');
@@ -145,12 +165,7 @@
                 State.currentTab = 'torrents';
                 UI.toggleDashboard(true);
             } else if (State.currentTab !== 'torrents') {
-                State.currentTab = 'torrents';
-                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
-                UI.renderDashboard();
-                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
-                    Tabs.Torrents.startPolling();
-                }
+                UI.switchTab('torrents');
             } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
                 Tabs.Torrents.render();
             }
@@ -302,7 +317,7 @@
             return;
         }
 
-        const concurrency = 3;
+        const concurrency = Math.max(1, parseInt(State.settings.queueConcurrency, 10) || 3);
         let completed = 0;
         const total = urls.length;
         const remaining = [...urls];
@@ -358,12 +373,21 @@
     async function generateM3U(name, links) {
         UI.showToast('Generating M3U...');
         let m3u = '#EXTM3U\n';
-        for (const link of links) {
-            const { ok, data } = await API.post('/unrestrict/link', { link });
-            if (ok && data && data.download) {
-                m3u += '#EXTINF:-1,' + data.filename + '\n' + data.download + '\n';
+        const pending = [...links];
+        const lines = [];
+        const worker = async () => {
+            while (pending.length) {
+                const link = pending.shift();
+                if (!link) break;
+                const { ok, data } = await API.post('/unrestrict/link', { link });
+                if (ok && data && data.download) {
+                    lines.push('#EXTINF:-1,' + data.filename + '\n' + data.download);
+                }
             }
-        }
+        };
+        const pool = Math.min(2, links.length);
+        await Promise.all(Array.from({ length: pool }, () => worker()));
+        m3u += lines.join('\n') + (lines.length ? '\n' : '');
         const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
         const url = URL.createObjectURL(blob);
         const a = DOM.create('a', { href: url, download: name.replace(/[^a-z0-9]/gi, '_') + '.m3u' });

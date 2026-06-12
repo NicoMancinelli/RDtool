@@ -228,6 +228,22 @@
         }
     };
 
+    function makeInvertBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
+            onClick: () => {
+                const boxes = document.querySelectorAll(checkboxSelector);
+                let checked = 0;
+                boxes.forEach(cb => { cb.checked = !cb.checked; if (cb.checked) checked++; });
+                if (selectAllChk) {
+                    selectAllChk.checked = checked === boxes.length;
+                    selectAllChk.indeterminate = checked > 0 && checked < boxes.length;
+                }
+                UI.showToast('Inverted (' + checked + ' selected)');
+            }
+        });
+    }
+
     function makeCopyUrlsBtn(getUrls) {
         return DOM.create('button', {
             className: 'rd-input-btn', textContent: 'Copy URLs', style: 'margin:0;',
@@ -342,9 +358,7 @@
                     queueStatus.style.display = '';
                     queueBtn.textContent = 'Queued ' + sel.length;
                     UI.showToast('Queued ' + sel.length + ' items');
-                    State.currentTab = 'links';
-                    UI.renderDashboard();
-                    processQueue(sel, 'queue');
+                    UI.openTab('links', () => processQueue(sel, 'queue'));
                 }
             });
 
@@ -418,10 +432,10 @@
                         className: 'rd-action-btn rd-page-unrestrict', textContent: 'Queue',
                         dataset: { url: link.url },
                         onClick: () => {
-                            State.currentTab = 'links';
-                            UI.renderDashboard();
-                            if (link.url.startsWith('magnet:')) addMagnet(link.url);
-                            else unrestrictLinkOrFolder(link.url);
+                            UI.openTab('links', () => {
+                                if (link.url.startsWith('magnet:')) addMagnet(link.url);
+                                else unrestrictLinkOrFolder(link.url);
+                            });
                         }
                     });
 
@@ -477,6 +491,7 @@
             });
             leftGroup.append(
                 selectAllLabel,
+                makeInvertBtn('.rd-torrent-chk', selectAllChk),
                 makeCopyUrlsBtn(() => {
                     const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
                     const urls = [];
@@ -565,7 +580,7 @@
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: '1 File',
                         dataset: { link: t.links[0] },
-                        onClick: () => { State.currentTab = 'links'; UI.renderDashboard(); unrestrictLink(t.links[0], false); }
+                        onClick: () => { UI.openTab('links', () => unrestrictLink(t.links[0], false)); }
                     }));
                 } else {
                     actionChildren.push(DOM.create('span', {
@@ -574,7 +589,7 @@
                     }));
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: 'All (' + t.links.length + ')',
-                        onClick: () => { State.currentTab = 'links'; UI.renderDashboard(); processQueue([...t.links], 'queue'); }
+                        onClick: () => { UI.openTab('links', () => processQueue([...t.links], 'queue')); }
                     }));
                 }
             }
@@ -674,7 +689,8 @@
         },
 
         async _fetchCloud() {
-            const { ok, data, error } = await API.get('/downloads?limit=100');
+            const limit = parseInt(State.settings.cloudLimit, 10) || 100;
+            const { ok, data, error } = await API.get('/downloads?limit=' + limit);
             if (State.currentTab !== 'cloud') return;
             if (!ok) {
                 if (loadOfflineData('rd_cached_cloud', 'cachedCloud')) {
@@ -722,6 +738,7 @@
             });
             leftGroup.append(
                 selectAllLabel,
+                makeInvertBtn('.rd-cloud-chk', selectAllChk),
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
                 delSelBtn
             );
@@ -938,7 +955,8 @@
                 { key: 'notificationSound', label: 'Notification Sound' },
                 { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
                 { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
-                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' }
+                { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' },
+                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -961,6 +979,14 @@
                 ['3', '3 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']
             ], () => {
                 if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents) Tabs.Torrents.startPolling();
+            }));
+            wrapper.append(this._buildSelectRow('Queue Concurrency', 'queueConcurrency', [
+                ['1', '1 (safest)'], ['2', '2'], ['3', '3 (default)'], ['5', '5'], ['8', '8 (fastest)']
+            ]));
+            wrapper.append(this._buildSelectRow('Cloud History Limit', 'cloudLimit', [
+                ['50', '50 items'], ['100', '100 items'], ['250', '250 items'], ['500', '500 items']
+            ], () => {
+                if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
             }));
 
             // Text inputs
