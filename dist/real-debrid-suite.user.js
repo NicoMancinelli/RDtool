@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      38.8
+// @version      38.9
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -815,7 +815,7 @@ GM_addStyle(`:root {
     // =========================================================================
 
     const Config = {
-        VERSION: '38.8',
+        VERSION: '38.9',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -849,7 +849,9 @@ GM_addStyle(`:root {
             torrentPollInterval: '4',
             queueConcurrency: '3',
             cloudLimit: '100',
-            useUnrestrictCache: true
+            useUnrestrictCache: true,
+            apiRateLimit: '4',
+            maxLinksPerScan: '150'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),
@@ -962,7 +964,9 @@ GM_addStyle(`:root {
         linksHistoryTypeFilter: 'all',
         lastUrl: location.href,
         unrestrictCache: new Map(),
-        linkCheckCache: new Map()
+        linkCheckCache: new Map(),
+        pageCollapsedDomains: new Set(),
+        torrentStatusFilter: 'all'
     };
 
     // =========================================================================
@@ -1056,7 +1060,9 @@ GM_addStyle(`:root {
     const API = {
         _queue: [],
         _activeCount: 0,
-        _maxPerSec: 4,
+        get _maxPerSec() {
+            return Math.max(1, parseInt(State.settings.apiRateLimit, 10) || 4);
+        },
         _BASE: 'https://api.real-debrid.com/rest/1.0',
 
         _enqueue(fn) {
@@ -2590,6 +2596,17 @@ GM_addStyle(`:root {
         }
     };
 
+    function makeDeselectAllBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'None', style: 'margin:0;',
+            onClick: () => {
+                document.querySelectorAll(checkboxSelector).forEach(cb => { cb.checked = false; });
+                if (selectAllChk) { selectAllChk.checked = false; selectAllChk.indeterminate = false; }
+                UI.showToast('Selection cleared');
+            }
+        });
+    }
+
     function makeInvertBtn(checkboxSelector, selectAllChk) {
         return DOM.create('button', {
             className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
@@ -2726,6 +2743,7 @@ GM_addStyle(`:root {
 
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-page-chk', selectAllChk),
                 selectUncachedBtn,
                 invertSelBtn,
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value).filter(u => u)),
@@ -2758,9 +2776,13 @@ GM_addStyle(`:root {
                 groupChk.addEventListener('change', () => {
                     groupContent.querySelectorAll('.rd-page-chk').forEach(c => c.checked = groupChk.checked);
                 });
+                if (State.pageCollapsedDomains.has(domain)) groupContent.style.display = 'none';
                 groupHeader.addEventListener('click', (e) => {
                     if (e.target === groupChk) return;
-                    groupContent.style.display = groupContent.style.display === 'none' ? 'flex' : 'none';
+                    const hiding = groupContent.style.display !== 'none';
+                    groupContent.style.display = hiding ? 'none' : 'flex';
+                    if (hiding) State.pageCollapsedDomains.add(domain);
+                    else State.pageCollapsedDomains.delete(domain);
                 });
                 groupHeader.append(groupChk, groupLabel);
 
@@ -2851,9 +2873,15 @@ GM_addStyle(`:root {
                     }
                 }
             });
+            const refreshBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Refresh', style: 'margin:0;',
+                onClick: () => this._fetchTorrents(true)
+            });
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-torrent-chk', selectAllChk),
                 makeInvertBtn('.rd-torrent-chk', selectAllChk),
+                refreshBtn,
                 makeCopyUrlsBtn(() => {
                     const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
                     const urls = [];
@@ -2878,7 +2906,19 @@ GM_addStyle(`:root {
                 placeholder: 'Search Torrents...', style: 'margin:0; margin-top:8px;',
                 onInput: (e) => this._renderList(e.target.value)
             });
-            controlBar.append(topRow, searchInput);
+            const statusFilter = State.torrentStatusFilter || 'all';
+            const statusRow = DOM.create('div', { style: 'display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;' });
+            [['all', 'All'], ['active', 'Active'], ['done', 'Done'], ['error', 'Errors']].forEach(([val, label]) => {
+                statusRow.append(DOM.create('button', {
+                    className: 'rd-input-btn' + (statusFilter === val ? ' primary' : ''),
+                    textContent: label, style: 'margin:0; flex:1; min-width:60px;',
+                    onClick: () => {
+                        State.torrentStatusFilter = val;
+                        this.render();
+                    }
+                }));
+            });
+            controlBar.append(topRow, searchInput, statusRow);
 
             const listContainer = DOM.create('div', { id: 'rd-torrent-list-container', className: 'rd-log-list' });
             area.append(controlBar, listContainer);
@@ -2904,9 +2944,22 @@ GM_addStyle(`:root {
             }
 
             let filtered = State.cachedTorrents;
+            const statusFilter = State.torrentStatusFilter || 'all';
+            if (statusFilter === 'active') {
+                filtered = filtered.filter(t => t.status !== 'downloaded' && t.status !== 'dead' && t.status !== 'error');
+            } else if (statusFilter === 'done') {
+                filtered = filtered.filter(t => t.status === 'downloaded');
+            } else if (statusFilter === 'error') {
+                filtered = filtered.filter(t => t.status === 'dead' || t.status === 'error');
+            }
             if (filterText) {
                 const lf = filterText.toLowerCase();
                 filtered = filtered.filter(t => t.filename.toLowerCase().includes(lf));
+            }
+
+            if (filtered.length === 0) {
+                container.append(DOM.create('div', { style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);', textContent: 'No matching torrents.' }));
+                return;
             }
 
             for (const t of filtered) {
@@ -3098,9 +3151,15 @@ GM_addStyle(`:root {
                     }
                 }
             });
+            const cloudRefreshBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Refresh', style: 'margin:0;',
+                onClick: () => this._fetchCloud()
+            });
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-cloud-chk', selectAllChk),
                 makeInvertBtn('.rd-cloud-chk', selectAllChk),
+                cloudRefreshBtn,
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
                 delSelBtn
             );
@@ -3350,6 +3409,12 @@ GM_addStyle(`:root {
             ], () => {
                 if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
             }));
+            wrapper.append(this._buildSelectRow('API Rate Limit', 'apiRateLimit', [
+                ['2', '2 req/s'], ['4', '4 req/s (default)'], ['6', '6 req/s'], ['8', '8 req/s']
+            ]));
+            wrapper.append(this._buildSelectRow('Max Links Per Scan', 'maxLinksPerScan', [
+                ['50', '50'], ['150', '150 (default)'], ['300', '300'], ['500', '500']
+            ]));
 
             // Text inputs
             wrapper.append(this._buildTextRow('Dashboard Toggle Shortcut', 'toggleShortcut', State.settings.toggleShortcut));
@@ -3364,6 +3429,14 @@ GM_addStyle(`:root {
                 DOM.create('button', { className: 'rd-input-btn', textContent: 'Import Settings', style: 'flex:1;', onClick: () => this._importSettings() })
             );
             wrapper.append(backupRow);
+            wrapper.append(DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Clear Session Caches', style: 'width:100%; margin-top:8px;',
+                onClick: () => {
+                    State.unrestrictCache.clear();
+                    State.linkCheckCache.clear();
+                    UI.showToast('Session caches cleared');
+                }
+            }));
 
             // Logout
             wrapper.append(DOM.create('button', {
@@ -3487,7 +3560,9 @@ GM_addStyle(`:root {
 const Scanner = {
     _xrayTimer: null,
     _scanTimer: null,
+    _pageRefreshTimer: null,
     _observer: null,
+    _linksScannedThisPass: 0,
 
     init() {
         if (!State.apiKey) return;
@@ -3520,17 +3595,24 @@ const Scanner = {
 
         // SPA navigation detection
         State.lastUrl = location.href;
-        setInterval(() => {
-            if (location.href !== State.lastUrl) {
-                State.lastUrl = location.href;
-                State.scannedLinksMap.clear();
-                State.processedUrls.clear();
-                document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
-                document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
-                UI.updateBadge(0);
-                this.scanPage();
-            }
-        }, 1000);
+        const onNav = () => {
+            if (location.href === State.lastUrl) return;
+            State.lastUrl = location.href;
+            State.scannedLinksMap.clear();
+            State.processedUrls.clear();
+            State.pageCollapsedDomains.clear();
+            document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
+            document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
+            UI.updateBadge(0);
+            this.scanPage();
+        };
+        window.addEventListener('popstate', onNav);
+        window.addEventListener('hashchange', onNav);
+        const origPush = history.pushState;
+        const origReplace = history.replaceState;
+        history.pushState = function() { origPush.apply(this, arguments); onNav(); };
+        history.replaceState = function() { origReplace.apply(this, arguments); onNav(); };
+        setInterval(onNav, 2000);
 
         // Initial scan
         this.scanPage();
@@ -3554,10 +3636,16 @@ const Scanner = {
 
     _scanDocument(doc) {
         let newFound = false;
-        doc.querySelectorAll('a:not(.rd-processed)').forEach(link => {
+        const maxPerPass = Math.max(20, parseInt(State.settings.maxLinksPerScan, 10) || 150);
+        this._linksScannedThisPass = 0;
+        const links = doc.querySelectorAll('a:not(.rd-processed)');
+        for (let i = 0; i < links.length; i++) {
+            if (this._linksScannedThisPass >= maxPerPass) break;
+            const link = links[i];
+            this._linksScannedThisPass++;
             let url = link.href;
             let text = (link.innerText || '').trim() || url;
-            if (!url) return;
+            if (!url) continue;
 
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
@@ -3577,7 +3665,7 @@ const Scanner = {
                 link.classList.add('rd-processed');
                 // Check host status
                 let hostDomain;
-                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { return; }
+                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { continue; }
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 
@@ -3604,10 +3692,13 @@ const Scanner = {
                 }
                 newFound = true;
             }
-        });
+        }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
-            if (State.currentTab === 'page' && State.isExpanded) Tabs.Page.refresh();
+            if (State.currentTab === 'page' && State.isExpanded) {
+                clearTimeout(this._pageRefreshTimer);
+                this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
+            }
         }
     },
 

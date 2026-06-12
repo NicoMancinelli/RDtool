@@ -228,6 +228,17 @@
         }
     };
 
+    function makeDeselectAllBtn(checkboxSelector, selectAllChk) {
+        return DOM.create('button', {
+            className: 'rd-input-btn', textContent: 'None', style: 'margin:0;',
+            onClick: () => {
+                document.querySelectorAll(checkboxSelector).forEach(cb => { cb.checked = false; });
+                if (selectAllChk) { selectAllChk.checked = false; selectAllChk.indeterminate = false; }
+                UI.showToast('Selection cleared');
+            }
+        });
+    }
+
     function makeInvertBtn(checkboxSelector, selectAllChk) {
         return DOM.create('button', {
             className: 'rd-input-btn', textContent: 'Invert', style: 'margin:0;',
@@ -364,6 +375,7 @@
 
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-page-chk', selectAllChk),
                 selectUncachedBtn,
                 invertSelBtn,
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-page-chk:checked')).map(c => c.value).filter(u => u)),
@@ -396,9 +408,13 @@
                 groupChk.addEventListener('change', () => {
                     groupContent.querySelectorAll('.rd-page-chk').forEach(c => c.checked = groupChk.checked);
                 });
+                if (State.pageCollapsedDomains.has(domain)) groupContent.style.display = 'none';
                 groupHeader.addEventListener('click', (e) => {
                     if (e.target === groupChk) return;
-                    groupContent.style.display = groupContent.style.display === 'none' ? 'flex' : 'none';
+                    const hiding = groupContent.style.display !== 'none';
+                    groupContent.style.display = hiding ? 'none' : 'flex';
+                    if (hiding) State.pageCollapsedDomains.add(domain);
+                    else State.pageCollapsedDomains.delete(domain);
                 });
                 groupHeader.append(groupChk, groupLabel);
 
@@ -489,9 +505,15 @@
                     }
                 }
             });
+            const refreshBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Refresh', style: 'margin:0;',
+                onClick: () => this._fetchTorrents(true)
+            });
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-torrent-chk', selectAllChk),
                 makeInvertBtn('.rd-torrent-chk', selectAllChk),
+                refreshBtn,
                 makeCopyUrlsBtn(() => {
                     const selIds = new Set(Array.from(document.querySelectorAll('.rd-torrent-chk:checked')).map(c => c.value));
                     const urls = [];
@@ -516,7 +538,19 @@
                 placeholder: 'Search Torrents...', style: 'margin:0; margin-top:8px;',
                 onInput: (e) => this._renderList(e.target.value)
             });
-            controlBar.append(topRow, searchInput);
+            const statusFilter = State.torrentStatusFilter || 'all';
+            const statusRow = DOM.create('div', { style: 'display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;' });
+            [['all', 'All'], ['active', 'Active'], ['done', 'Done'], ['error', 'Errors']].forEach(([val, label]) => {
+                statusRow.append(DOM.create('button', {
+                    className: 'rd-input-btn' + (statusFilter === val ? ' primary' : ''),
+                    textContent: label, style: 'margin:0; flex:1; min-width:60px;',
+                    onClick: () => {
+                        State.torrentStatusFilter = val;
+                        this.render();
+                    }
+                }));
+            });
+            controlBar.append(topRow, searchInput, statusRow);
 
             const listContainer = DOM.create('div', { id: 'rd-torrent-list-container', className: 'rd-log-list' });
             area.append(controlBar, listContainer);
@@ -542,9 +576,22 @@
             }
 
             let filtered = State.cachedTorrents;
+            const statusFilter = State.torrentStatusFilter || 'all';
+            if (statusFilter === 'active') {
+                filtered = filtered.filter(t => t.status !== 'downloaded' && t.status !== 'dead' && t.status !== 'error');
+            } else if (statusFilter === 'done') {
+                filtered = filtered.filter(t => t.status === 'downloaded');
+            } else if (statusFilter === 'error') {
+                filtered = filtered.filter(t => t.status === 'dead' || t.status === 'error');
+            }
             if (filterText) {
                 const lf = filterText.toLowerCase();
                 filtered = filtered.filter(t => t.filename.toLowerCase().includes(lf));
+            }
+
+            if (filtered.length === 0) {
+                container.append(DOM.create('div', { style: 'text-align:center; padding:30px 16px; color:var(--rd-text-secondary);', textContent: 'No matching torrents.' }));
+                return;
             }
 
             for (const t of filtered) {
@@ -736,9 +783,15 @@
                     }
                 }
             });
+            const cloudRefreshBtn = DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Refresh', style: 'margin:0;',
+                onClick: () => this._fetchCloud()
+            });
             leftGroup.append(
                 selectAllLabel,
+                makeDeselectAllBtn('.rd-cloud-chk', selectAllChk),
                 makeInvertBtn('.rd-cloud-chk', selectAllChk),
+                cloudRefreshBtn,
                 makeCopyUrlsBtn(() => Array.from(document.querySelectorAll('.rd-cloud-chk:checked')).map(c => c.dataset.url).filter(u => u && u !== '#')),
                 delSelBtn
             );
@@ -988,6 +1041,12 @@
             ], () => {
                 if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
             }));
+            wrapper.append(this._buildSelectRow('API Rate Limit', 'apiRateLimit', [
+                ['2', '2 req/s'], ['4', '4 req/s (default)'], ['6', '6 req/s'], ['8', '8 req/s']
+            ]));
+            wrapper.append(this._buildSelectRow('Max Links Per Scan', 'maxLinksPerScan', [
+                ['50', '50'], ['150', '150 (default)'], ['300', '300'], ['500', '500']
+            ]));
 
             // Text inputs
             wrapper.append(this._buildTextRow('Dashboard Toggle Shortcut', 'toggleShortcut', State.settings.toggleShortcut));
@@ -1002,6 +1061,14 @@
                 DOM.create('button', { className: 'rd-input-btn', textContent: 'Import Settings', style: 'flex:1;', onClick: () => this._importSettings() })
             );
             wrapper.append(backupRow);
+            wrapper.append(DOM.create('button', {
+                className: 'rd-input-btn', textContent: 'Clear Session Caches', style: 'width:100%; margin-top:8px;',
+                onClick: () => {
+                    State.unrestrictCache.clear();
+                    State.linkCheckCache.clear();
+                    UI.showToast('Session caches cleared');
+                }
+            }));
 
             // Logout
             wrapper.append(DOM.create('button', {

@@ -1,7 +1,9 @@
 const Scanner = {
     _xrayTimer: null,
     _scanTimer: null,
+    _pageRefreshTimer: null,
     _observer: null,
+    _linksScannedThisPass: 0,
 
     init() {
         if (!State.apiKey) return;
@@ -34,17 +36,24 @@ const Scanner = {
 
         // SPA navigation detection
         State.lastUrl = location.href;
-        setInterval(() => {
-            if (location.href !== State.lastUrl) {
-                State.lastUrl = location.href;
-                State.scannedLinksMap.clear();
-                State.processedUrls.clear();
-                document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
-                document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
-                UI.updateBadge(0);
-                this.scanPage();
-            }
-        }, 1000);
+        const onNav = () => {
+            if (location.href === State.lastUrl) return;
+            State.lastUrl = location.href;
+            State.scannedLinksMap.clear();
+            State.processedUrls.clear();
+            State.pageCollapsedDomains.clear();
+            document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
+            document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
+            UI.updateBadge(0);
+            this.scanPage();
+        };
+        window.addEventListener('popstate', onNav);
+        window.addEventListener('hashchange', onNav);
+        const origPush = history.pushState;
+        const origReplace = history.replaceState;
+        history.pushState = function() { origPush.apply(this, arguments); onNav(); };
+        history.replaceState = function() { origReplace.apply(this, arguments); onNav(); };
+        setInterval(onNav, 2000);
 
         // Initial scan
         this.scanPage();
@@ -68,10 +77,16 @@ const Scanner = {
 
     _scanDocument(doc) {
         let newFound = false;
-        doc.querySelectorAll('a:not(.rd-processed)').forEach(link => {
+        const maxPerPass = Math.max(20, parseInt(State.settings.maxLinksPerScan, 10) || 150);
+        this._linksScannedThisPass = 0;
+        const links = doc.querySelectorAll('a:not(.rd-processed)');
+        for (let i = 0; i < links.length; i++) {
+            if (this._linksScannedThisPass >= maxPerPass) break;
+            const link = links[i];
+            this._linksScannedThisPass++;
             let url = link.href;
             let text = (link.innerText || '').trim() || url;
-            if (!url) return;
+            if (!url) continue;
 
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
@@ -91,7 +106,7 @@ const Scanner = {
                 link.classList.add('rd-processed');
                 // Check host status
                 let hostDomain;
-                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { return; }
+                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { continue; }
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 
@@ -118,10 +133,13 @@ const Scanner = {
                 }
                 newFound = true;
             }
-        });
+        }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
-            if (State.currentTab === 'page' && State.isExpanded) Tabs.Page.refresh();
+            if (State.currentTab === 'page' && State.isExpanded) {
+                clearTimeout(this._pageRefreshTimer);
+                this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
+            }
         }
     },
 

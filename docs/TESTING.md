@@ -117,6 +117,11 @@ RDtool is a Tampermonkey userscript — automated unit tests are limited. Run th
 - [ ] Queue Concurrency and Cloud History Limit settings apply
 - [ ] Invert works on Torrents and Cloud tabs
 - [ ] Tab switches from inline icons do not flash/rebuild entire dashboard
+- [ ] Torrent status filters (Active/Done/Errors) work; Refresh fetches latest
+- [ ] Cloud Refresh button reloads history
+- [ ] None clears selection on Page/Torrents/Cloud
+- [ ] Clear Session Caches resets unrestrict/x-ray caches
+- [ ] Page domain groups stay collapsed when re-scanning
 
 ## Regression Checks (v37.1 / v38.0)
 

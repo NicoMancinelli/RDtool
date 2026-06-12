@@ -4,7 +4,9 @@
     const API = {
         _queue: [],
         _activeCount: 0,
-        _maxPerSec: 4,
+        get _maxPerSec() {
+            return Math.max(1, parseInt(State.settings.apiRateLimit, 10) || 4);
+        },
         _BASE: 'https://api.real-debrid.com/rest/1.0',
 
         _enqueue(fn) {

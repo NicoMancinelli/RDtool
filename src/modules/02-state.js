@@ -36,7 +36,9 @@
         linksHistoryTypeFilter: 'all',
         lastUrl: location.href,
         unrestrictCache: new Map(),
-        linkCheckCache: new Map()
+        linkCheckCache: new Map(),
+        pageCollapsedDomains: new Set(),
+        torrentStatusFilter: 'all'
     };
 
     // =========================================================================

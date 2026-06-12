@@ -2,7 +2,7 @@
     // =========================================================================
 
     const Config = {
-        VERSION: '38.8',
+        VERSION: '38.9',
 
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
@@ -36,7 +36,9 @@
             torrentPollInterval: '4',
             queueConcurrency: '3',
             cloudLimit: '100',
-            useUnrestrictCache: true
+            useUnrestrictCache: true,
+            apiRateLimit: '4',
+            maxLinksPerScan: '150'
         },
 
         isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2),

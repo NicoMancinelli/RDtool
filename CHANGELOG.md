@@ -4,6 +4,23 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [38.9] - 2026-06-10
+
+### Added
+
+- Torrent status filters — All | Active | Done | Errors
+- **None** (deselect all) on Page, Torrents, and Cloud tabs
+- Manual **Refresh** buttons on Torrents and Cloud tabs
+- **Clear Session Caches** in Settings → Backup (unrestrict + x-ray caches)
+- Page tab remembers collapsed domain groups per session
+- Configurable API rate limit (2–8 req/s) and max links per scan pass
+
+### Changed
+
+- SPA navigation uses `popstate` / `history` hooks plus slower fallback poll (2s)
+- Page tab refresh throttled (400ms) while scanning to reduce rebuild churn
+- Scanner caps links processed per pass to avoid jank on huge pages
+
 ## [38.8] - 2026-06-10
 
 ### Added
