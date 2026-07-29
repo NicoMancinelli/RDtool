@@ -4,6 +4,35 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [40.1] - 2026-07-29
+
+### Added
+- **`Config.TAB_KEYS`** central registry — single source of truth for tab identifiers (`cloud`, `links`, `page`, `settings`, `torrents`) prevents silent typo bugs in `Tabs.*` lookups across `02-state.js`, `06-ui.js`, `07-core.js`, and `tabs/*`.
+- **`UI.notify()` wrapper** for `GM_notification` + optional notification chime — replaces 2 inline call sites (`07-core.js` queue-complete, `tabs/torrents.js` torrent-ready) with a single API.
+- **CI / GitHub Actions section in README** documenting the deliberate Actions-off decision and how to restore CI if needed.
+- **6 new regression tests** (32 new test cases, 7 → 39 total) locking in the perf + bug-fix contracts:
+  - `list-renderer-shallow-equal.test.mjs` (R3-4) — cheap default compare, ~10× faster than `JSON.stringify`
+  - `list-renderer-map-lookup.test.mjs` (R3-3) — `existing.get(k)` instead of per-item `querySelector`
+  - `scanner-host-regex.test.mjs` (R3-5) — `Scanner._HOST_RE` hostname extraction
+  - `media-drag-cleanup.test.mjs` (R2-2) — mousemove/mouseup listeners cleaned up on `Media.close()`
+  - `torrent-polling-hidden.test.mjs` (R3-2) — interval callback short-circuits when `document.hidden`
+  - `tab-keys.test.mjs` (R2-3) — `Config.TAB_KEYS` contract lock
+- **ESLint config** for `tests/**/*.mjs` with vitest globals declared.
+
+### Changed
+- **Scanner init (R3-1):** 4 sequential `API.get()` calls (`/hosts/domains`, `/hosts/status`, `/hosts/regex`, `/hosts/regexFolder`) wrapped in `Promise.all` — ~4× faster on cold start.
+- **ListRenderer perf (R3-3, R3-4):** per-item loop reads from `existing` Map (O(1)) instead of `container.querySelector(...)` (O(n)). Default `compareFn` replaced with shallow-equal `_shallowEqual` instead of expensive `JSON.stringify` round-trip.
+- **Scanner hot path (R3-5):** `new URL(url).hostname` per qualifying link replaced with cached regex `/^(?:https?|magnet):\/\/([^/]+)/i` — ~10× faster per link.
+- **`package-lock.json` synced to package.json@40.0.0** (was drifting at 38.9.0).
+
+### Fixed
+- **Media drag listener leak (R2-2, RISKY):** `_setupDrag()` registered `mousemove` + `mouseup` as anonymous arrow functions that were never removed; `Media.close()` now stores handler refs and `removeEventListener`s them. After 5 open/close cycles, listener count goes from 10 leaked → 0.
+- **Torrent polling wastes API quota when tab backgrounded (R3-2, RISKY):** `setInterval` callback in `tabs/torrents.js` `startPolling()` now short-circuits when `document.hidden` is true — previously only the seed fetch checked hidden state; background tabs kept polling every 4s indefinitely.
+- **20 dead `typeof Tabs !== 'undefined'` guards** (R2-1, bulk noise):** removed across `06-ui.js` (7), `07-core.js` (11), `tabs/settings.js` (2) — `tabs/00-index.js` unconditionally creates `Tabs = {}` at module load, so the guards were always-true defensive checks adding runtime noise.
+
+### Notes
+- `npm audit fix` evaluated and rejected: the auto-fix bumps `eslint` to v10 (breaking config compat) and introduces 2 new transitive vulns via `minimatch`/`brace-expansion` chains. Net regression vs. current state (3 HIGH + 1 LOW transitive dev-vulns). Dev-only; not shipped to users.
+
 ## [40.0] - 2026-06-10
 
 ### Added

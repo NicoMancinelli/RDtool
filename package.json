@@ -7,7 +7,7 @@
   "scripts": {
     "split": "node scripts/split-source.mjs",
     "build": "node scripts/build.mjs",
-    "lint": "eslint src/",
+    "lint": "eslint src tests",
     "test": "vitest run",
     "rebuild": "npm run split && npm run build"
   },

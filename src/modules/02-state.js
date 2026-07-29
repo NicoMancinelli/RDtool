@@ -4,7 +4,7 @@
     const State = {
         apiKey: '',
         settings: {},
-        currentTab: 'links',
+        currentTab: Config.TAB_KEYS.LINKS,
         isExpanded: false,
         isMobile: false,
         // Data
@@ -60,8 +60,8 @@
     State.settings = migrateSettings(savedSettings);
 
     if (State.settings.rememberLastTab) {
-        const lastTab = GM_getValue('rd_last_tab', 'links');
-        if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+        const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
+        if (Object.values(Config.TAB_KEYS).includes(lastTab)) {
             State.currentTab = lastTab;
         }
     }

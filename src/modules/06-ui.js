@@ -88,7 +88,7 @@
                         State.torrentRefreshInterval = null;
                     }
                 } else {
-                    if (State.isExpanded && State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                    if (State.isExpanded && State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                         Tabs.Torrents.startPolling();
                     }
                 }
@@ -221,10 +221,10 @@
         },
 
         switchTab(key) {
-            const valid = ['links', 'page', 'torrents', 'cloud', 'settings'];
+            const valid = Object.values(Config.TAB_KEYS);
             if (!valid.includes(key)) return;
 
-            if (State.currentTab === 'torrents' && key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS && key !== Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.stopPolling) {
                 Tabs.Torrents.stopPolling();
             }
 
@@ -238,12 +238,12 @@
                 });
             }
 
-            if (key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+            if (key === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                 Tabs.Torrents.startPolling();
             }
 
             const capKey = key.charAt(0).toUpperCase() + key.slice(1);
-            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+            if (Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
             }
         },
@@ -266,8 +266,8 @@
                 State.isExpanded = true;
                 if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
-                    const lastTab = GM_getValue('rd_last_tab', 'links');
-                    if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+                    const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
+                    if (Object.values(Config.TAB_KEYS).includes(lastTab)) {
                         State.currentTab = lastTab;
                     }
                 }
@@ -280,7 +280,7 @@
                 addMobileSheetBehavior(container);
 
                 // Start torrent polling if on torrents tab
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                if (State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                     Tabs.Torrents.startPolling();
                 }
             } else {
@@ -290,7 +290,7 @@
                 container.style.cssText = '';
 
                 // Stop torrent polling
-                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+                if (Tabs.Torrents && Tabs.Torrents.stopPolling) {
                     Tabs.Torrents.stopPolling();
                 }
 
@@ -359,11 +359,11 @@
 
             // Tabs
             const tabDefs = [
-                { key: 'links', label: 'Links' },
-                { key: 'page', label: 'Page', badge: true },
-                { key: 'torrents', label: 'Torrents' },
-                { key: 'cloud', label: 'Cloud' },
-                { key: 'settings', label: 'Settings' }
+                { key: Config.TAB_KEYS.LINKS, label: 'Links' },
+                { key: Config.TAB_KEYS.PAGE, label: 'Page', badge: true },
+                { key: Config.TAB_KEYS.TORRENTS, label: 'Torrents' },
+                { key: Config.TAB_KEYS.CLOUD, label: 'Cloud' },
+                { key: Config.TAB_KEYS.SETTINGS, label: 'Settings' }
             ];
 
             const tabs = DOM.create('div', { className: 'rd-tabs' });
@@ -396,7 +396,7 @@
             UI.updateHeaderQuota();
 
             const capKey = State.currentTab.charAt(0).toUpperCase() + State.currentTab.slice(1);
-            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+            if (Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
             } else {
                 contentArea.appendChild(DOM.create('div', {
@@ -457,6 +457,12 @@
                     if (toast.parentNode) toast.parentNode.removeChild(toast);
                 }, 300);
             }, 3000);
+        },
+
+        // System notification + optional chime. Wraps GM_notification so callers don't repeat the pattern.
+        notify(title, text, timeout = 4000) {
+            try { GM_notification({ title, text, timeout }); } catch (_) { /* GM_notification may be disabled */ }
+            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         },
 
         showShortcutsModal() {

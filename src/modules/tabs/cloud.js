@@ -19,7 +19,7 @@
             if (reset) State.cloudPage = 1;
             const page = State.cloudPage || 1;
             const { ok, data, error } = await API.getDownloadsPage(limit, page);
-            if (State.currentTab !== 'cloud') return;
+            if (State.currentTab !== Config.TAB_KEYS.CLOUD) return;
             if (!ok) {
                 if (loadOfflineData('rd_cached_cloud', 'cachedCloud')) {
                     this._renderBase();

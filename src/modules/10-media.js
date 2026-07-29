@@ -3,6 +3,8 @@ const Media = {
     _playlist: null,
     _playlistIndex: 0,
     _keyHandler: null,
+    _dragMoveHandler: null,
+    _dragUpHandler: null,
 
     open(url, filename, playlist = null, mode = 'direct') {
         this.close();
@@ -149,6 +151,9 @@ const Media = {
         this._objectUrls = [];
         // Remove keyboard handler
         if (this._keyHandler) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null; }
+        // Remove drag handlers (avoid listener leak across media sessions)
+        if (this._dragMoveHandler) { document.removeEventListener('mousemove', this._dragMoveHandler); this._dragMoveHandler = null; }
+        if (this._dragUpHandler) { document.removeEventListener('mouseup', this._dragUpHandler); this._dragUpHandler = null; }
         win.remove();
     },
 
@@ -161,15 +166,17 @@ const Media = {
             startY = e.clientY - win.offsetTop;
             document.body.style.userSelect = 'none';
         });
-        document.addEventListener('mousemove', (e) => {
+        this._dragMoveHandler = (e) => {
             if (isDragging && !win.classList.contains('rd-fullscreen')) {
                 win.style.left = (e.clientX - startX) + 'px';
                 win.style.top = (e.clientY - startY) + 'px';
                 win.style.bottom = 'auto';
                 win.style.right = 'auto';
             }
-        });
-        document.addEventListener('mouseup', () => { isDragging = false; document.body.style.userSelect = ''; });
+        };
+        this._dragUpHandler = () => { isDragging = false; document.body.style.userSelect = ''; };
+        document.addEventListener('mousemove', this._dragMoveHandler);
+        document.addEventListener('mouseup', this._dragUpHandler);
 
         // Touch drag
         let touchStartX, touchStartY;

@@ -6,7 +6,7 @@
             if (!container) return;
             const keyFn = options.key || ((item) => item.id);
             const renderFn = options.render;
-            const compareFn = options.compare || ((a, b) => JSON.stringify(a) === JSON.stringify(b));
+            const compareFn = options.compare || ListRenderer._shallowEqual;
             const emptyMessage = options.emptyMessage || 'No items.';
 
             if (!items.length) {
@@ -34,7 +34,8 @@
             let prev = null;
             for (const item of items) {
                 const k = String(keyFn(item));
-                let el = container.querySelector('[data-list-key="' + k + '"]');
+                // O(1) lookup via the existing Map — avoids O(n) querySelector per item
+                let el = existing.get(k);
                 const prevData = el && el._listData;
 
                 if (!el) {
@@ -74,5 +75,16 @@
         cloudCompare(a, b) {
             return a.id === b.id && a.filename === b.filename && a.filesize === b.filesize &&
                 a.download === b.download && a.generated === b.generated;
+        },
+
+        // Cheap structural equality for top-level scalar fields.
+        // Caller-provided compare functions still recommended for nested arrays/objects.
+        _shallowEqual(a, b) {
+            if (a === b) return true;
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+            const ak = Object.keys(a), bk = Object.keys(b);
+            if (ak.length !== bk.length) return false;
+            for (const k of ak) if (a[k] !== b[k]) return false;
+            return true;
         }
     };

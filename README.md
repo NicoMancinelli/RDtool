@@ -64,6 +64,12 @@ npm test         # Vitest (settings migration, utils)
 
 Source modules live in `src/`. The bundled output in `dist/` is what users install.
 
+### CI / GitHub Actions
+
+GitHub Actions are **intentionally disabled** on this repo (settings off, no workflow files).
+Lint + test + build all run locally via the commands above before each commit. If you want CI
+back on, add `.github/workflows/ci.yml` running `npm ci && npm run lint && npm test && npm run build`.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).

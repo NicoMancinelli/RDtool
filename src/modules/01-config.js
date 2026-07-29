@@ -5,6 +5,15 @@
         VERSION: '40.0',
         SETTINGS_VERSION: 2,
 
+        // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
+        TAB_KEYS: Object.freeze({
+            CLOUD: 'cloud',
+            LINKS: 'links',
+            PAGE: 'page',
+            SETTINGS: 'settings',
+            TORRENTS: 'torrents'
+        }),
+
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
             'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',

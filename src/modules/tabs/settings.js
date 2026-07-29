@@ -19,12 +19,12 @@
 
         async _fetchAndRender(area) {
             const userRes = await API.get('/user');
-            if (State.currentTab !== 'settings') return;
+            if (State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
             if (!userRes.ok) { DOM.clear(area); area.append(DOM.create('div', { style: 'padding:16px; color:var(--rd-danger);', textContent: 'Failed to load account info' })); return; }
             State.userProfile = userRes.data;
 
             const trafficRes = await API.get('/traffic');
-            if (State.currentTab !== 'settings') return;
+            if (State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
             if (trafficRes.ok) State.trafficData = trafficRes.data;
 
             this._renderView(area);
@@ -156,7 +156,7 @@
             wrapper.append(this._buildSelectRow('Torrent Refresh Interval', 'torrentPollInterval', [
                 ['3', '3 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']
             ], () => {
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents) Tabs.Torrents.startPolling();
+                if (State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents) Tabs.Torrents.startPolling();
             }));
             wrapper.append(this._buildSelectRow('Queue Concurrency', 'queueConcurrency', [
                 ['1', '1 (safest)'], ['2', '2'], ['3', '3 (default)'], ['5', '5'], ['8', '8 (fastest)']
@@ -164,7 +164,7 @@
             wrapper.append(this._buildSelectRow('Cloud History Limit', 'cloudLimit', [
                 ['50', '50 items'], ['100', '100 items'], ['250', '250 items'], ['500', '500 items']
             ], () => {
-                if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
+                if (State.currentTab === Config.TAB_KEYS.CLOUD && Tabs.Cloud) Tabs.Cloud.render();
             }));
             wrapper.append(this._buildSelectRow('API Rate Limit', 'apiRateLimit', [
                 ['2', '2 req/s'], ['4', '4 req/s (default)'], ['6', '6 req/s'], ['8', '8 req/s']

@@ -818,6 +818,15 @@ GM_addStyle(`:root {
         VERSION: '40.0',
         SETTINGS_VERSION: 2,
 
+        // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
+        TAB_KEYS: Object.freeze({
+            CLOUD: 'cloud',
+            LINKS: 'links',
+            PAGE: 'page',
+            SETTINGS: 'settings',
+            TORRENTS: 'torrents'
+        }),
+
         BASE_HOSTS: [
             '1fichier\\.com\\/\\?[a-z0-9]{10,10}', 'rapidgator\\.net\\/file\\/[a-z0-9]{32,32}', 'mega\\.nz\\/(file|folder|#F?!)',
             'mediafire\\.com\\/(file|folder)\\/[a-z0-9]{15,15}', 'drive\\.google\\.com\\/(file|drive|folders)\\/.+',
@@ -938,7 +947,7 @@ GM_addStyle(`:root {
     const State = {
         apiKey: '',
         settings: {},
-        currentTab: 'links',
+        currentTab: Config.TAB_KEYS.LINKS,
         isExpanded: false,
         isMobile: false,
         // Data
@@ -994,8 +1003,8 @@ GM_addStyle(`:root {
     State.settings = migrateSettings(savedSettings);
 
     if (State.settings.rememberLastTab) {
-        const lastTab = GM_getValue('rd_last_tab', 'links');
-        if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+        const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
+        if (Object.values(Config.TAB_KEYS).includes(lastTab)) {
             State.currentTab = lastTab;
         }
     }
@@ -1451,7 +1460,7 @@ GM_addStyle(`:root {
             if (!container) return;
             const keyFn = options.key || ((item) => item.id);
             const renderFn = options.render;
-            const compareFn = options.compare || ((a, b) => JSON.stringify(a) === JSON.stringify(b));
+            const compareFn = options.compare || ListRenderer._shallowEqual;
             const emptyMessage = options.emptyMessage || 'No items.';
 
             if (!items.length) {
@@ -1479,7 +1488,8 @@ GM_addStyle(`:root {
             let prev = null;
             for (const item of items) {
                 const k = String(keyFn(item));
-                let el = container.querySelector('[data-list-key="' + k + '"]');
+                // O(1) lookup via the existing Map — avoids O(n) querySelector per item
+                let el = existing.get(k);
                 const prevData = el && el._listData;
 
                 if (!el) {
@@ -1519,6 +1529,17 @@ GM_addStyle(`:root {
         cloudCompare(a, b) {
             return a.id === b.id && a.filename === b.filename && a.filesize === b.filesize &&
                 a.download === b.download && a.generated === b.generated;
+        },
+
+        // Cheap structural equality for top-level scalar fields.
+        // Caller-provided compare functions still recommended for nested arrays/objects.
+        _shallowEqual(a, b) {
+            if (a === b) return true;
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+            const ak = Object.keys(a), bk = Object.keys(b);
+            if (ak.length !== bk.length) return false;
+            for (const k of ak) if (a[k] !== b[k]) return false;
+            return true;
         }
     };
 
@@ -1613,7 +1634,7 @@ GM_addStyle(`:root {
                         State.torrentRefreshInterval = null;
                     }
                 } else {
-                    if (State.isExpanded && State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                    if (State.isExpanded && State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                         Tabs.Torrents.startPolling();
                     }
                 }
@@ -1746,10 +1767,10 @@ GM_addStyle(`:root {
         },
 
         switchTab(key) {
-            const valid = ['links', 'page', 'torrents', 'cloud', 'settings'];
+            const valid = Object.values(Config.TAB_KEYS);
             if (!valid.includes(key)) return;
 
-            if (State.currentTab === 'torrents' && key !== 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS && key !== Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.stopPolling) {
                 Tabs.Torrents.stopPolling();
             }
 
@@ -1763,12 +1784,12 @@ GM_addStyle(`:root {
                 });
             }
 
-            if (key === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+            if (key === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                 Tabs.Torrents.startPolling();
             }
 
             const capKey = key.charAt(0).toUpperCase() + key.slice(1);
-            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+            if (Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
             }
         },
@@ -1791,8 +1812,8 @@ GM_addStyle(`:root {
                 State.isExpanded = true;
                 if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
-                    const lastTab = GM_getValue('rd_last_tab', 'links');
-                    if (['links', 'page', 'torrents', 'cloud', 'settings'].includes(lastTab)) {
+                    const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
+                    if (Object.values(Config.TAB_KEYS).includes(lastTab)) {
                         State.currentTab = lastTab;
                     }
                 }
@@ -1805,7 +1826,7 @@ GM_addStyle(`:root {
                 addMobileSheetBehavior(container);
 
                 // Start torrent polling if on torrents tab
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.startPolling) {
+                if (State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents && Tabs.Torrents.startPolling) {
                     Tabs.Torrents.startPolling();
                 }
             } else {
@@ -1815,7 +1836,7 @@ GM_addStyle(`:root {
                 container.style.cssText = '';
 
                 // Stop torrent polling
-                if (typeof Tabs !== 'undefined' && Tabs.Torrents && Tabs.Torrents.stopPolling) {
+                if (Tabs.Torrents && Tabs.Torrents.stopPolling) {
                     Tabs.Torrents.stopPolling();
                 }
 
@@ -1884,11 +1905,11 @@ GM_addStyle(`:root {
 
             // Tabs
             const tabDefs = [
-                { key: 'links', label: 'Links' },
-                { key: 'page', label: 'Page', badge: true },
-                { key: 'torrents', label: 'Torrents' },
-                { key: 'cloud', label: 'Cloud' },
-                { key: 'settings', label: 'Settings' }
+                { key: Config.TAB_KEYS.LINKS, label: 'Links' },
+                { key: Config.TAB_KEYS.PAGE, label: 'Page', badge: true },
+                { key: Config.TAB_KEYS.TORRENTS, label: 'Torrents' },
+                { key: Config.TAB_KEYS.CLOUD, label: 'Cloud' },
+                { key: Config.TAB_KEYS.SETTINGS, label: 'Settings' }
             ];
 
             const tabs = DOM.create('div', { className: 'rd-tabs' });
@@ -1921,7 +1942,7 @@ GM_addStyle(`:root {
             UI.updateHeaderQuota();
 
             const capKey = State.currentTab.charAt(0).toUpperCase() + State.currentTab.slice(1);
-            if (typeof Tabs !== 'undefined' && Tabs[capKey] && Tabs[capKey].render) {
+            if (Tabs[capKey] && Tabs[capKey].render) {
                 Tabs[capKey].render();
             } else {
                 contentArea.appendChild(DOM.create('div', {
@@ -1982,6 +2003,12 @@ GM_addStyle(`:root {
                     if (toast.parentNode) toast.parentNode.removeChild(toast);
                 }, 300);
             }, 3000);
+        },
+
+        // System notification + optional chime. Wraps GM_notification so callers don't repeat the pattern.
+        notify(title, text, timeout = 4000) {
+            try { GM_notification({ title, text, timeout }); } catch (_) { /* GM_notification may be disabled */ }
+            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         },
 
         showShortcutsModal() {
@@ -2175,7 +2202,7 @@ GM_addStyle(`:root {
         // Update header stats counter if visible
         const statsEl = document.getElementById('rd-session-counter');
         if (statsEl) statsEl.textContent = State.sessionStats.processed + ' processed';
-        if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.refresh();
+        if (State.currentTab === Config.TAB_KEYS.LINKS && Tabs.Links) Tabs.Links.refresh();
     }
 
     async function unrestrictLink(url, silent = false) {
@@ -2273,7 +2300,7 @@ GM_addStyle(`:root {
         const { ok } = await API.del('/torrents/delete/' + id);
         if (ok) {
             State.cachedTorrents = State.cachedTorrents.filter(t => t.id !== id);
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.refresh();
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.refresh();
             UI.showToast('Torrent deleted');
         }
     }
@@ -2282,7 +2309,7 @@ GM_addStyle(`:root {
         const { ok } = await API.del('/downloads/delete/' + id);
         if (ok) {
             State.cachedCloud = State.cachedCloud.filter(c => c.id !== id);
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.refresh();
             UI.showToast('Removed from cloud');
         }
     }
@@ -2292,7 +2319,7 @@ GM_addStyle(`:root {
         if (dead.length === 0) return UI.showToast('Nothing to clean');
         await Promise.all(dead.map(t => API.del('/torrents/delete/' + t.id)));
         State.cachedTorrents = State.cachedTorrents.filter(t => t.status !== 'dead' && t.status !== 'error');
-        if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.refresh();
+        if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.refresh();
         UI.showToast('Cleaned ' + dead.length + ' dead torrents');
     }
 
@@ -2302,7 +2329,7 @@ GM_addStyle(`:root {
             UI.showToast('Points converted! +30 days');
             State.userProfile = null;
             State.trafficData = null;
-            if (State.currentTab === 'settings' && typeof Tabs !== 'undefined') Tabs.Settings.render();
+            if (State.currentTab === Config.TAB_KEYS.SETTINGS) Tabs.Settings.render();
         } else {
             UI.showToast('Failed: ' + error, 'error');
         }
@@ -2313,15 +2340,15 @@ GM_addStyle(`:root {
     function finishMagnetAdd(callback) {
         if (State.settings.switchToTorrentsOnMagnet) {
             if (!State.isExpanded) {
-                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
-                State.currentTab = 'torrents';
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', Config.TAB_KEYS.TORRENTS);
+                State.currentTab = Config.TAB_KEYS.TORRENTS;
                 UI.toggleDashboard(true);
-            } else if (State.currentTab !== 'torrents') {
-                UI.switchTab('torrents');
-            } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
+            } else if (State.currentTab !== Config.TAB_KEYS.TORRENTS) {
+                UI.switchTab(Config.TAB_KEYS.TORRENTS);
+            } else if (Tabs.Torrents) {
                 Tabs.Torrents.render();
             }
-        } else if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') {
+        } else if (State.currentTab === Config.TAB_KEYS.TORRENTS) {
             Tabs.Torrents.render();
         }
         if (callback) callback();
@@ -2392,7 +2419,7 @@ GM_addStyle(`:root {
         if (ok) {
             State.cachedCloud = [];
             GM_setValue('rd_cached_cloud', '[]');
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.render();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.render();
             UI.showToast('All cloud items deleted');
         } else {
             UI.showToast('Delete failed: ' + error, 'error');
@@ -2404,7 +2431,7 @@ GM_addStyle(`:root {
         if (ok) {
             State.cachedTorrents = [];
             GM_setValue('rd_cached_torrents', '[]');
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.render();
             UI.showToast('All torrents deleted');
         } else {
             UI.showToast('Delete failed: ' + error, 'error');
@@ -2416,7 +2443,7 @@ GM_addStyle(`:root {
         if (ok) {
             const item = State.cachedCloud.find((c) => c.id === id);
             if (item) item.filename = newName;
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.refresh();
             UI.showToast('Renamed');
         } else {
             UI.showToast('Rename failed: ' + error, 'error');
@@ -2476,9 +2503,8 @@ GM_addStyle(`:root {
         } else {
             UI.showToast('Queue finished (' + total + ')');
             if (State.settings.notifyOnQueueComplete) {
-                GM_notification({ title: 'RD Queue Complete', text: 'Processed ' + total + ' items', timeout: 4000 });
+                UI.notify('RD Queue Complete', 'Processed ' + total + ' items');
             }
-            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         }
     }
 
@@ -2580,7 +2606,7 @@ GM_addStyle(`:root {
                 if (!valid.length) throw new Error('No valid items');
                 State.linkHistory = State.linkHistory.concat(valid).slice(-500);
                 GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
-                if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.render();
+                if (State.currentTab === Config.TAB_KEYS.LINKS && Tabs.Links) Tabs.Links.render();
                 UI.showToast(valid.length + ' item(s) imported');
             } catch (e) {
                 UI.showToast('Invalid history file', 'error');
@@ -3134,7 +3160,7 @@ GM_addStyle(`:root {
                     queueStatus.style.display = '';
                     queueBtn.textContent = 'Queued ' + sel.length;
                     UI.showToast('Queued ' + sel.length + ' items');
-                    UI.openTab('links', () => processQueue(sel, 'queue'));
+                    UI.openTab(Config.TAB_KEYS.LINKS, () => processQueue(sel, 'queue'));
                 }
             });
 
@@ -3213,7 +3239,7 @@ GM_addStyle(`:root {
                         className: 'rd-action-btn rd-page-unrestrict', textContent: 'Queue',
                         dataset: { url: link.url },
                         onClick: () => {
-                            UI.openTab('links', () => {
+                            UI.openTab(Config.TAB_KEYS.LINKS, () => {
                                 if (link.url.startsWith('magnet:')) addMagnet(link.url);
                                 else unrestrictLinkOrFolder(link.url);
                             });
@@ -3275,7 +3301,7 @@ GM_addStyle(`:root {
                     }
                 }
             }
-            if (State.currentTab === 'page' && State.isExpanded) {
+            if (State.currentTab === Config.TAB_KEYS.PAGE && State.isExpanded) {
                 const area = document.getElementById('rd-content-area');
                 if (area && area.querySelector('.rd-page-chk')) this.render();
             }
@@ -3480,7 +3506,7 @@ GM_addStyle(`:root {
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: '1 File',
                         dataset: { link: t.links[0] },
-                        onClick: () => { UI.openTab('links', () => unrestrictLink(t.links[0], false)); }
+                        onClick: () => { UI.openTab(Config.TAB_KEYS.LINKS, () => unrestrictLink(t.links[0], false)); }
                     }));
                 } else {
                     actionChildren.push(DOM.create('span', {
@@ -3532,7 +3558,10 @@ GM_addStyle(`:root {
             if (State.apiKey && !document.hidden) {
                 this._fetchTorrents(true);
                 const pollMs = Math.max(3, parseInt(State.settings.torrentPollInterval, 10) || 4) * 1000;
-                this._pollingInterval = setInterval(() => this._fetchTorrents(false), pollMs);
+                this._pollingInterval = setInterval(() => {
+                    if (document.hidden) return;
+                    this._fetchTorrents(false);
+                }, pollMs);
             }
         },
 
@@ -3565,8 +3594,7 @@ GM_addStyle(`:root {
                 if (t.status === 'downloaded' && !State.completedTorrentsMemory.has(t.id)) {
                     State.completedTorrentsMemory.add(t.id);
                     if (!State.isFirstTorrentFetch) {
-                        GM_notification({ title: 'RD Download Ready', text: t.filename, timeout: 4000 });
-                        if (typeof playNotificationChime === 'function') playNotificationChime();
+                        UI.notify('RD Download Ready', t.filename);
                     }
                 }
             });
@@ -3601,7 +3629,7 @@ GM_addStyle(`:root {
             if (reset) State.cloudPage = 1;
             const page = State.cloudPage || 1;
             const { ok, data, error } = await API.getDownloadsPage(limit, page);
-            if (State.currentTab !== 'cloud') return;
+            if (State.currentTab !== Config.TAB_KEYS.CLOUD) return;
             if (!ok) {
                 if (loadOfflineData('rd_cached_cloud', 'cachedCloud')) {
                     this._renderBase();
@@ -3806,12 +3834,12 @@ GM_addStyle(`:root {
 
         async _fetchAndRender(area) {
             const userRes = await API.get('/user');
-            if (State.currentTab !== 'settings') return;
+            if (State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
             if (!userRes.ok) { DOM.clear(area); area.append(DOM.create('div', { style: 'padding:16px; color:var(--rd-danger);', textContent: 'Failed to load account info' })); return; }
             State.userProfile = userRes.data;
 
             const trafficRes = await API.get('/traffic');
-            if (State.currentTab !== 'settings') return;
+            if (State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
             if (trafficRes.ok) State.trafficData = trafficRes.data;
 
             this._renderView(area);
@@ -3943,7 +3971,7 @@ GM_addStyle(`:root {
             wrapper.append(this._buildSelectRow('Torrent Refresh Interval', 'torrentPollInterval', [
                 ['3', '3 seconds'], ['4', '4 seconds'], ['6', '6 seconds'], ['10', '10 seconds'], ['15', '15 seconds'], ['30', '30 seconds']
             ], () => {
-                if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined' && Tabs.Torrents) Tabs.Torrents.startPolling();
+                if (State.currentTab === Config.TAB_KEYS.TORRENTS && Tabs.Torrents) Tabs.Torrents.startPolling();
             }));
             wrapper.append(this._buildSelectRow('Queue Concurrency', 'queueConcurrency', [
                 ['1', '1 (safest)'], ['2', '2'], ['3', '3 (default)'], ['5', '5'], ['8', '8 (fastest)']
@@ -3951,7 +3979,7 @@ GM_addStyle(`:root {
             wrapper.append(this._buildSelectRow('Cloud History Limit', 'cloudLimit', [
                 ['50', '50 items'], ['100', '100 items'], ['250', '250 items'], ['500', '500 items']
             ], () => {
-                if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined' && Tabs.Cloud) Tabs.Cloud.render();
+                if (State.currentTab === Config.TAB_KEYS.CLOUD && Tabs.Cloud) Tabs.Cloud.render();
             }));
             wrapper.append(this._buildSelectRow('API Rate Limit', 'apiRateLimit', [
                 ['2', '2 req/s'], ['4', '4 req/s (default)'], ['6', '6 req/s'], ['8', '8 req/s']
@@ -4110,39 +4138,40 @@ const Scanner = {
     _pageRefreshTimer: null,
     _observer: null,
     _linksScannedThisPass: 0,
+    _HOST_RE: /^(?:https?|magnet):\/\/([^/]+)/i,
 
     init() {
         if (!State.apiKey) return;
 
-        // Fetch hosts
-        API.get('/hosts/domains').then(({ ok, data }) => {
-            if (ok && Array.isArray(data)) {
-                State.dynamicHosts = data;
-                State.hostsUpdatedAt = Date.now();
-                State.hostsFetchFailed = false;
-                GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
-                GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
-                Config.hostRegex = Config.getActiveRegex();
-            } else {
-                State.hostsFetchFailed = true;
-            }
-            if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
-        });
-        API.get('/hosts/status').then(({ ok, data }) => {
-            if (ok && data) State.liveHosts = data;
-        });
-
-        if (State.settings.useApiHostRegex) {
-            API.getHostsRegex().then(({ ok, data }) => {
+        // Fetch hosts (parallel — independent calls, no data dependency)
+        const useApiRegex = State.settings.useApiHostRegex;
+        Promise.all([
+            API.get('/hosts/domains').then(({ ok, data }) => {
+                if (ok && Array.isArray(data)) {
+                    State.dynamicHosts = data;
+                    State.hostsUpdatedAt = Date.now();
+                    State.hostsFetchFailed = false;
+                    GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
+                    GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
+                    Config.hostRegex = Config.getActiveRegex();
+                } else {
+                    State.hostsFetchFailed = true;
+                }
+                if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
+            }),
+            API.get('/hosts/status').then(({ ok, data }) => {
+                if (ok && data) State.liveHosts = data;
+            }),
+            useApiRegex ? API.getHostsRegex().then(({ ok, data }) => {
                 if (ok && data && data.regex) {
                     State.apiHostRegex = data.regex;
                     Config.hostRegex = Config.getActiveRegex();
                 }
-            });
-            API.getHostsRegexFolder().then(({ ok, data }) => {
+            }) : Promise.resolve(),
+            useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
                 if (ok && data && data.regex) State.apiHostRegexFolder = data.regex;
-            });
-        }
+            }) : Promise.resolve()
+        ]).catch(() => { /* individual failures already handled above */ });
 
         // MutationObserver
         this._observer = new MutationObserver(() => {
@@ -4223,8 +4252,9 @@ const Scanner = {
             } else if (Config.hostRegex && Config.hostRegex.test(url) && !link.querySelector('img')) {
                 link.classList.add('rd-processed');
                 // Check host status
-                let hostDomain;
-                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { continue; }
+                const hostMatch = url.match(Scanner._HOST_RE);
+                if (!hostMatch) continue;
+                const hostDomain = hostMatch[1].replace(/^www\./, '');
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 
@@ -4445,6 +4475,8 @@ const Media = {
     _playlist: null,
     _playlistIndex: 0,
     _keyHandler: null,
+    _dragMoveHandler: null,
+    _dragUpHandler: null,
 
     open(url, filename, playlist = null, mode = 'direct') {
         this.close();
@@ -4591,6 +4623,9 @@ const Media = {
         this._objectUrls = [];
         // Remove keyboard handler
         if (this._keyHandler) { document.removeEventListener('keydown', this._keyHandler); this._keyHandler = null; }
+        // Remove drag handlers (avoid listener leak across media sessions)
+        if (this._dragMoveHandler) { document.removeEventListener('mousemove', this._dragMoveHandler); this._dragMoveHandler = null; }
+        if (this._dragUpHandler) { document.removeEventListener('mouseup', this._dragUpHandler); this._dragUpHandler = null; }
         win.remove();
     },
 
@@ -4603,15 +4638,17 @@ const Media = {
             startY = e.clientY - win.offsetTop;
             document.body.style.userSelect = 'none';
         });
-        document.addEventListener('mousemove', (e) => {
+        this._dragMoveHandler = (e) => {
             if (isDragging && !win.classList.contains('rd-fullscreen')) {
                 win.style.left = (e.clientX - startX) + 'px';
                 win.style.top = (e.clientY - startY) + 'px';
                 win.style.bottom = 'auto';
                 win.style.right = 'auto';
             }
-        });
-        document.addEventListener('mouseup', () => { isDragging = false; document.body.style.userSelect = ''; });
+        };
+        this._dragUpHandler = () => { isDragging = false; document.body.style.userSelect = ''; };
+        document.addEventListener('mousemove', this._dragMoveHandler);
+        document.addEventListener('mouseup', this._dragUpHandler);
 
         // Touch drag
         let touchStartX, touchStartY;

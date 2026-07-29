@@ -4,39 +4,40 @@ const Scanner = {
     _pageRefreshTimer: null,
     _observer: null,
     _linksScannedThisPass: 0,
+    _HOST_RE: /^(?:https?|magnet):\/\/([^/]+)/i,
 
     init() {
         if (!State.apiKey) return;
 
-        // Fetch hosts
-        API.get('/hosts/domains').then(({ ok, data }) => {
-            if (ok && Array.isArray(data)) {
-                State.dynamicHosts = data;
-                State.hostsUpdatedAt = Date.now();
-                State.hostsFetchFailed = false;
-                GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
-                GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
-                Config.hostRegex = Config.getActiveRegex();
-            } else {
-                State.hostsFetchFailed = true;
-            }
-            if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
-        });
-        API.get('/hosts/status').then(({ ok, data }) => {
-            if (ok && data) State.liveHosts = data;
-        });
-
-        if (State.settings.useApiHostRegex) {
-            API.getHostsRegex().then(({ ok, data }) => {
+        // Fetch hosts (parallel — independent calls, no data dependency)
+        const useApiRegex = State.settings.useApiHostRegex;
+        Promise.all([
+            API.get('/hosts/domains').then(({ ok, data }) => {
+                if (ok && Array.isArray(data)) {
+                    State.dynamicHosts = data;
+                    State.hostsUpdatedAt = Date.now();
+                    State.hostsFetchFailed = false;
+                    GM_setValue('rd_dynamic_hosts', JSON.stringify(data));
+                    GM_setValue('rd_hosts_updated_at', String(State.hostsUpdatedAt));
+                    Config.hostRegex = Config.getActiveRegex();
+                } else {
+                    State.hostsFetchFailed = true;
+                }
+                if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
+            }),
+            API.get('/hosts/status').then(({ ok, data }) => {
+                if (ok && data) State.liveHosts = data;
+            }),
+            useApiRegex ? API.getHostsRegex().then(({ ok, data }) => {
                 if (ok && data && data.regex) {
                     State.apiHostRegex = data.regex;
                     Config.hostRegex = Config.getActiveRegex();
                 }
-            });
-            API.getHostsRegexFolder().then(({ ok, data }) => {
+            }) : Promise.resolve(),
+            useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
                 if (ok && data && data.regex) State.apiHostRegexFolder = data.regex;
-            });
-        }
+            }) : Promise.resolve()
+        ]).catch(() => { /* individual failures already handled above */ });
 
         // MutationObserver
         this._observer = new MutationObserver(() => {
@@ -117,8 +118,9 @@ const Scanner = {
             } else if (Config.hostRegex && Config.hostRegex.test(url) && !link.querySelector('img')) {
                 link.classList.add('rd-processed');
                 // Check host status
-                let hostDomain;
-                try { hostDomain = new URL(url).hostname.replace('www.', ''); } catch(e) { continue; }
+                const hostMatch = url.match(Scanner._HOST_RE);
+                if (!hostMatch) continue;
+                const hostDomain = hostMatch[1].replace(/^www\./, '');
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 

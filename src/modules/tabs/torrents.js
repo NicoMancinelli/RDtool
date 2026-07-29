@@ -194,7 +194,7 @@
                     actionChildren.push(DOM.create('span', {
                         className: 'rd-dl-badge', textContent: '1 File',
                         dataset: { link: t.links[0] },
-                        onClick: () => { UI.openTab('links', () => unrestrictLink(t.links[0], false)); }
+                        onClick: () => { UI.openTab(Config.TAB_KEYS.LINKS, () => unrestrictLink(t.links[0], false)); }
                     }));
                 } else {
                     actionChildren.push(DOM.create('span', {
@@ -246,7 +246,10 @@
             if (State.apiKey && !document.hidden) {
                 this._fetchTorrents(true);
                 const pollMs = Math.max(3, parseInt(State.settings.torrentPollInterval, 10) || 4) * 1000;
-                this._pollingInterval = setInterval(() => this._fetchTorrents(false), pollMs);
+                this._pollingInterval = setInterval(() => {
+                    if (document.hidden) return;
+                    this._fetchTorrents(false);
+                }, pollMs);
             }
         },
 
@@ -279,8 +282,7 @@
                 if (t.status === 'downloaded' && !State.completedTorrentsMemory.has(t.id)) {
                     State.completedTorrentsMemory.add(t.id);
                     if (!State.isFirstTorrentFetch) {
-                        GM_notification({ title: 'RD Download Ready', text: t.filename, timeout: 4000 });
-                        if (typeof playNotificationChime === 'function') playNotificationChime();
+                        UI.notify('RD Download Ready', t.filename);
                     }
                 }
             });

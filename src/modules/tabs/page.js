@@ -72,7 +72,7 @@
                     queueStatus.style.display = '';
                     queueBtn.textContent = 'Queued ' + sel.length;
                     UI.showToast('Queued ' + sel.length + ' items');
-                    UI.openTab('links', () => processQueue(sel, 'queue'));
+                    UI.openTab(Config.TAB_KEYS.LINKS, () => processQueue(sel, 'queue'));
                 }
             });
 
@@ -151,7 +151,7 @@
                         className: 'rd-action-btn rd-page-unrestrict', textContent: 'Queue',
                         dataset: { url: link.url },
                         onClick: () => {
-                            UI.openTab('links', () => {
+                            UI.openTab(Config.TAB_KEYS.LINKS, () => {
                                 if (link.url.startsWith('magnet:')) addMagnet(link.url);
                                 else unrestrictLinkOrFolder(link.url);
                             });
@@ -213,7 +213,7 @@
                     }
                 }
             }
-            if (State.currentTab === 'page' && State.isExpanded) {
+            if (State.currentTab === Config.TAB_KEYS.PAGE && State.isExpanded) {
                 const area = document.getElementById('rd-content-area');
                 if (area && area.querySelector('.rd-page-chk')) this.render();
             }

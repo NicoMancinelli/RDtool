@@ -19,7 +19,7 @@
         // Update header stats counter if visible
         const statsEl = document.getElementById('rd-session-counter');
         if (statsEl) statsEl.textContent = State.sessionStats.processed + ' processed';
-        if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.refresh();
+        if (State.currentTab === Config.TAB_KEYS.LINKS && Tabs.Links) Tabs.Links.refresh();
     }
 
     async function unrestrictLink(url, silent = false) {
@@ -117,7 +117,7 @@
         const { ok } = await API.del('/torrents/delete/' + id);
         if (ok) {
             State.cachedTorrents = State.cachedTorrents.filter(t => t.id !== id);
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.refresh();
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.refresh();
             UI.showToast('Torrent deleted');
         }
     }
@@ -126,7 +126,7 @@
         const { ok } = await API.del('/downloads/delete/' + id);
         if (ok) {
             State.cachedCloud = State.cachedCloud.filter(c => c.id !== id);
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.refresh();
             UI.showToast('Removed from cloud');
         }
     }
@@ -136,7 +136,7 @@
         if (dead.length === 0) return UI.showToast('Nothing to clean');
         await Promise.all(dead.map(t => API.del('/torrents/delete/' + t.id)));
         State.cachedTorrents = State.cachedTorrents.filter(t => t.status !== 'dead' && t.status !== 'error');
-        if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.refresh();
+        if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.refresh();
         UI.showToast('Cleaned ' + dead.length + ' dead torrents');
     }
 
@@ -146,7 +146,7 @@
             UI.showToast('Points converted! +30 days');
             State.userProfile = null;
             State.trafficData = null;
-            if (State.currentTab === 'settings' && typeof Tabs !== 'undefined') Tabs.Settings.render();
+            if (State.currentTab === Config.TAB_KEYS.SETTINGS) Tabs.Settings.render();
         } else {
             UI.showToast('Failed: ' + error, 'error');
         }
@@ -157,15 +157,15 @@
     function finishMagnetAdd(callback) {
         if (State.settings.switchToTorrentsOnMagnet) {
             if (!State.isExpanded) {
-                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', 'torrents');
-                State.currentTab = 'torrents';
+                if (State.settings.rememberLastTab) GM_setValue('rd_last_tab', Config.TAB_KEYS.TORRENTS);
+                State.currentTab = Config.TAB_KEYS.TORRENTS;
                 UI.toggleDashboard(true);
-            } else if (State.currentTab !== 'torrents') {
-                UI.switchTab('torrents');
-            } else if (typeof Tabs !== 'undefined' && Tabs.Torrents) {
+            } else if (State.currentTab !== Config.TAB_KEYS.TORRENTS) {
+                UI.switchTab(Config.TAB_KEYS.TORRENTS);
+            } else if (Tabs.Torrents) {
                 Tabs.Torrents.render();
             }
-        } else if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') {
+        } else if (State.currentTab === Config.TAB_KEYS.TORRENTS) {
             Tabs.Torrents.render();
         }
         if (callback) callback();
@@ -236,7 +236,7 @@
         if (ok) {
             State.cachedCloud = [];
             GM_setValue('rd_cached_cloud', '[]');
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.render();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.render();
             UI.showToast('All cloud items deleted');
         } else {
             UI.showToast('Delete failed: ' + error, 'error');
@@ -248,7 +248,7 @@
         if (ok) {
             State.cachedTorrents = [];
             GM_setValue('rd_cached_torrents', '[]');
-            if (State.currentTab === 'torrents' && typeof Tabs !== 'undefined') Tabs.Torrents.render();
+            if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.render();
             UI.showToast('All torrents deleted');
         } else {
             UI.showToast('Delete failed: ' + error, 'error');
@@ -260,7 +260,7 @@
         if (ok) {
             const item = State.cachedCloud.find((c) => c.id === id);
             if (item) item.filename = newName;
-            if (State.currentTab === 'cloud' && typeof Tabs !== 'undefined') Tabs.Cloud.refresh();
+            if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.refresh();
             UI.showToast('Renamed');
         } else {
             UI.showToast('Rename failed: ' + error, 'error');
@@ -320,9 +320,8 @@
         } else {
             UI.showToast('Queue finished (' + total + ')');
             if (State.settings.notifyOnQueueComplete) {
-                GM_notification({ title: 'RD Queue Complete', text: 'Processed ' + total + ' items', timeout: 4000 });
+                UI.notify('RD Queue Complete', 'Processed ' + total + ' items');
             }
-            if (State.settings.notificationSound && typeof playNotificationChime === 'function') playNotificationChime();
         }
     }
 
@@ -424,7 +423,7 @@
                 if (!valid.length) throw new Error('No valid items');
                 State.linkHistory = State.linkHistory.concat(valid).slice(-500);
                 GM_setValue('rd_link_history', JSON.stringify(State.linkHistory));
-                if (State.currentTab === 'links' && typeof Tabs !== 'undefined' && Tabs.Links) Tabs.Links.render();
+                if (State.currentTab === Config.TAB_KEYS.LINKS && Tabs.Links) Tabs.Links.render();
                 UI.showToast(valid.length + ' item(s) imported');
             } catch (e) {
                 UI.showToast('Invalid history file', 'error');
