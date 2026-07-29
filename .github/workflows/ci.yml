@@ -35,6 +35,12 @@ jobs:
 
       - run: npm ci
 
+      # Audit gate: rejects HIGH/CRITICAL transitive vulns (per HER-116 decision,
+      # eslint v10 transitively resolves all known HIGHs). `--audit-level=high`
+      # exits 1 only on HIGH/CRITICAL; MODERATE/LOW are reported but not blocking.
+      - name: Audit (HIGH+ gate)
+        run: npm audit --audit-level=high
+
       - run: npm run lint
 
       - run: npm test

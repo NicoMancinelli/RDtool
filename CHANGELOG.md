@@ -4,6 +4,15 @@ All notable changes to Real-Debrid Suite (RDtool) are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning tracks the `@version` userscript metadata.
 
+## [Unreleased]
+
+### Changed
+- **HER-116 security decision:** bumped lint tooling to `eslint@^10.8.0` + `@eslint/js@^10.0.1`, which resolves the dev-only `npm audit` findings left in v40.1 (3 HIGH + 1 LOW transitive vulnerabilities). Verified `npm audit` reports 0 vulnerabilities, `npm run lint` passes, all 39 Vitest tests pass, and the userscript bundle still builds.
+- **CI audit gate:** GitHub Actions now runs `npm audit --audit-level=high` after `npm ci`, blocking future HIGH/CRITICAL transitive dependency regressions while allowing lower-severity advisories to be reviewed deliberately.
+
+### Notes
+- Rejected `npm audit fix` non-force: it partially bumps lockfile transitive packages but leaves the eslint v9 `minimatch`/`brace-expansion` path vulnerable and increases the report to 5 HIGH + 1 LOW. Direct eslint v10 upgrade is the clean path.
+
 ## [40.1] - 2026-07-29
 
 ### Added
@@ -31,7 +40,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 - **20 dead `typeof Tabs !== 'undefined'` guards** (R2-1, bulk noise):** removed across `06-ui.js` (7), `07-core.js` (11), `tabs/settings.js` (2) — `tabs/00-index.js` unconditionally creates `Tabs = {}` at module load, so the guards were always-true defensive checks adding runtime noise.
 
 ### Notes
-- `npm audit fix` evaluated and rejected: the auto-fix bumps `eslint` to v10 (breaking config compat) and introduces 2 new transitive vulns via `minimatch`/`brace-expansion` chains. Net regression vs. current state (3 HIGH + 1 LOW transitive dev-vulns). Dev-only; not shipped to users.
+- `npm audit fix` was evaluated for v40.1 and left for HER-116: non-force behavior was not clearly better at the time, and the remaining findings were dev-only (not shipped to users).
 
 ## [40.0] - 2026-06-10
 
