@@ -19,6 +19,41 @@
     }
 
     const UI = {
+        // Listeners installed by init() and torn down by destroy(). Page-lifetime
+        // for now (userscript runs in document context until navigation reload),
+        // but we keep refs so future hot-reload or SPA-unmount paths can release
+        // them without re-grepping the file.
+        _globalKeydownHandler: null,
+        _visibilityChangeHandler: null,
+        _containerListeners: [],
+
+        destroy() {
+            // Releases every listener installed by init(). Currently unused at
+            // runtime (Tampermonkey page lifecycle owns disposal), but exposed so
+            // future HMR / SPA route-switch paths can call it without leaving
+            // orphaned listeners — see HER-117.
+            if (this._globalKeydownHandler) {
+                document.removeEventListener('keydown', this._globalKeydownHandler);
+                this._globalKeydownHandler = null;
+            }
+            if (this._visibilityChangeHandler) {
+                document.removeEventListener('visibilitychange', this._visibilityChangeHandler);
+                this._visibilityChangeHandler = null;
+            }
+            this._containerListeners.forEach(({ target, type, handler, options }) => {
+                target.removeEventListener(type, handler, options);
+            });
+            this._containerListeners = [];
+        },
+
+        // Registers a listener on a DOM target and remembers the (target, type,
+        // handler, options) tuple so destroy() can remove it later. Use this for
+        // any listener installed by init() that isn't on document.
+        _trackContainerListener(target, type, handler, options) {
+            target.addEventListener(type, handler, options);
+            this._containerListeners.push({ target, type, handler, options });
+        },
+
         init() {
             // Main container
             const container = DOM.create('div', { id: 'rd-ui-container' });
@@ -46,8 +81,11 @@
             }
 
             // --- Step 3: Event delegation ---
-            // Click delegation on container
-            container.addEventListener('click', (e) => {
+            // HER-117: every listener installed here is registered through the
+            // _trackContainerListener / named-handler helpers so UI.destroy()
+            // can release them without re-grepping the source.
+
+            const onContainerClick = (e) => {
                 // If FAB is showing (not expanded) and has API key, open dashboard
                 if (!State.isExpanded && State.apiKey) {
                     const fab = container.querySelector('.rd-desktop-fab, .rd-mobile-fab');
@@ -56,10 +94,14 @@
                         return;
                     }
                 }
-            });
+            };
+            UI._trackContainerListener(container, 'click', onContainerClick);
 
-            // Global keydown
-            document.addEventListener('keydown', (e) => {
+            // Global keydown — page-lifetime listener. Ref is kept on UI so
+            // destroy() can remove it if a future hot-reload or SPA-unmount
+            // path ever needs to. Single registration: UI.init() is called once
+            // per script load.
+            UI._globalKeydownHandler = (e) => {
                 if (e.key === 'Escape') {
                     // Cascade: modal -> fullscreen -> media -> dashboard
                     const modal = document.querySelector('.rd-modal-overlay');
@@ -78,10 +120,11 @@
                     e.preventDefault();
                     UI.showShortcutsModal();
                 }
-            });
+            };
+            document.addEventListener('keydown', UI._globalKeydownHandler);
 
             // Visibility change — pause/resume torrent polling
-            document.addEventListener('visibilitychange', () => {
+            UI._visibilityChangeHandler = () => {
                 if (document.hidden) {
                     if (State.torrentRefreshInterval) {
                         clearInterval(State.torrentRefreshInterval);
@@ -92,19 +135,20 @@
                         Tabs.Torrents.startPolling();
                     }
                 }
-            });
+            };
+            document.addEventListener('visibilitychange', UI._visibilityChangeHandler);
 
             // Drag and drop on container
-            container.addEventListener('dragover', (e) => {
+            const onDragOver = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 container.classList.add('rd-drag-active');
-            });
-            container.addEventListener('dragleave', (e) => {
+            };
+            const onDragLeave = (e) => {
                 e.preventDefault();
                 container.classList.remove('rd-drag-active');
-            });
-            container.addEventListener('drop', (e) => {
+            };
+            const onDrop = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 container.classList.remove('rd-drag-active');
@@ -126,7 +170,10 @@
                 } else if (text) {
                     UI.showToast('Dropped text received (handler not ready)');
                 }
-            });
+            };
+            UI._trackContainerListener(container, 'dragover', onDragOver);
+            UI._trackContainerListener(container, 'dragleave', onDragLeave);
+            UI._trackContainerListener(container, 'drop', onDrop);
         },
 
         renderFAB() {

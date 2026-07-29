@@ -6,12 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [40.2] - 2026-07-30
+
+### Added
+- **`UI.destroy()`** releases every listener installed by `UI.init()` — keydown (Escape cascade + shortcut + `?`), visibilitychange, and all container-level click/drag/drop handlers. Page-lifetime safe today (Tampermonkey owns disposal) but the teardown is in place for future hot-reload or SPA-unmount paths (HER-117).
+- **`UI._trackContainerListener()`** helper — single registration point for container-level listeners so `UI.destroy()` can find them by (target, type, handler, options) tuple without re-grepping the source. All three drag listeners (`dragover`/`dragleave`/`drop`) and the FAB click delegation now flow through it.
+- **`Scanner.destroy()`** disconnects the page-lifetime `MutationObserver` and clears the scan debounce timer. Symmetric with `UI.destroy()`.
+- **`vitest.config.js`** with `environmentMatchGlobs` — `tests/media-jsdom*.test.mjs` and `tests/ui-jsdom*.test.mjs` run in jsdom; everything else stays on the default `node` env for speed. jsdom 26 added as a devDep.
+- **`tests/media-jsdom.test.mjs`** — 5 new tests against a real jsdom DOM, covering `Media.open` for video / audio / image / unknown formats, single-window invariant on repeated open, and listener-by-reference cleanup on `close()` (5 → 83 tests).
+- **ESLint config block** for jsdom-backed tests — extends `globals.browser` so `window` / `document` / `URL.createObjectURL` don't trip `no-undef` on the new tests.
+
 ### Changed
-- **HER-116 security decision:** bumped lint tooling to `eslint@^10.8.0` + `@eslint/js@^10.0.1`, which resolves the dev-only `npm audit` findings left in v40.1 (3 HIGH + 1 LOW transitive vulnerabilities). Verified `npm audit` reports 0 vulnerabilities, `npm run lint` passes, all 39 Vitest tests pass, and the userscript bundle still builds.
-- **CI audit gate:** GitHub Actions now runs `npm audit --audit-level=high` after `npm ci`, blocking future HIGH/CRITICAL transitive dependency regressions while allowing lower-severity advisories to be reviewed deliberately.
+- **`06-ui.js` event listeners** (HER-117): global keydown and visibilitychange handlers now use named refs (`UI._globalKeydownHandler`, `UI._visibilityChangeHandler`) instead of anonymous arrows. Container listeners flow through `_trackContainerListener()`. Behavior unchanged; infrastructure for future teardown.
+- **`09-scanner.js` MutationObserver** (HER-117): ref kept on `Scanner._observer` with explanatory comment documenting the page-lifetime choice. `Scanner.destroy()` is the paired teardown.
+- **HER-116 security decision** (now part of v40.2): bumped lint tooling to `eslint@^10.8.0` + `@eslint/js@^10.0.1`, which resolves the dev-only `npm audit` findings left in v40.1 (3 HIGH + 1 LOW transitive vulnerabilities). Verified `npm audit` reports 0 vulnerabilities, `npm run lint` passes, all 83 Vitest tests pass, and the userscript bundle still builds.
+- **CI audit gate** (now part of v40.2): GitHub Actions now runs `npm audit --audit-level=high` after `npm ci`, blocking future HIGH/CRITICAL transitive dependency regressions while allowing lower-severity advisories to be reviewed deliberately.
 
 ### Notes
 - Rejected `npm audit fix` non-force: it partially bumps lockfile transitive packages but leaves the eslint v9 `minimatch`/`brace-expansion` path vulnerable and increases the report to 5 HIGH + 1 LOW. Direct eslint v10 upgrade is the clean path.
+- The `dist/real-debrid-suite.user.js` shipped in v40.1 was tagged with `@version 40.1` in the source bundle (ac23320) but the file checked into `main` was stale (`@version 40.0`). v40.2 regenerates the bundle from `afad08c`'s source state, ensuring the GitHub Release artifact matches the `src/` truth.
+- HER-114 (GreasyFork manual upload) and HER-118 (GreasyFork auto-deploy) remain open — v40.2 does not include any GreasyFork credentials or pipeline.
 
 ## [40.1] - 2026-07-29
 

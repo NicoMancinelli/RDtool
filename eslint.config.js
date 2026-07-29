@@ -55,5 +55,21 @@ export default [
         rules: {
             'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
         }
+    },
+    {
+        // jsdom-backed tests (see vitest.config.js environmentMatchGlobs). They
+        // run inside a DOM context and use `window` / `document` / `URL` /
+        // `URL.createObjectURL` as globals, so extend the browser env for this
+        // slice. Tests in this scope still see vitest + node globals above.
+        files: [
+            'tests/media-jsdom.test.mjs',
+            'tests/ui-jsdom.test.mjs'
+        ],
+        languageOptions: {
+            globals: {
+                ...globals.browser,
+                ...globals.node
+            }
+        }
     }
 ];

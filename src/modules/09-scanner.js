@@ -6,6 +6,16 @@ const Scanner = {
     _linksScannedThisPass: 0,
     _HOST_RE: /^(?:https?|magnet):\/\/([^/]+)/i,
 
+    // Releases the MutationObserver. Currently a no-op at runtime (Tampermonkey
+    // owns the page lifecycle), but exposed for future HMR / SPA-unmount paths.
+    destroy() {
+        if (this._observer) {
+            this._observer.disconnect();
+            this._observer = null;
+        }
+        if (this._scanTimer) { clearTimeout(this._scanTimer); this._scanTimer = null; }
+    },
+
     init() {
         if (!State.apiKey) return;
 
@@ -39,7 +49,10 @@ const Scanner = {
             }) : Promise.resolve()
         ]).catch(() => { /* individual failures already handled above */ });
 
-        // MutationObserver
+        // MutationObserver — page-lifetime observer. Single registration in init(),
+        // paired with destroy() for symmetry. Currently never destroyed (Tampermonkey
+        // owns the page lifecycle), but the ref is kept so a future HMR / SPA
+        // route-switch path can disconnect without re-grepping — see HER-117.
         this._observer = new MutationObserver(() => {
             if (document.hidden) return;
             clearTimeout(this._scanTimer);
