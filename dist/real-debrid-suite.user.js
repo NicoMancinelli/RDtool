@@ -19,7 +19,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @connect      real-debrid.com
-// @sandbox      DOM
+// @sandbox      raw
 // @run-at       document-end
 // ==/UserScript==
 
