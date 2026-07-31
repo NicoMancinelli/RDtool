@@ -37,7 +37,7 @@ const MODULE_ORDER = [
 
 function readConfigVersion() {
     const configText = readFileSync(configPath, 'utf8');
-    const match = configText.match(/VERSION:\s*'([^']+)'/);
+    const match = configText.match(/VERSION:\s*['"]([^'"]+)['"]/);
     if (!match) {
         console.error('Could not read VERSION from 01-config.js');
         process.exit(1);
