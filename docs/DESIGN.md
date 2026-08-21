@@ -14,17 +14,20 @@ RDtool uses a dark-only glassmorphism UI injected into arbitrary web pages via T
 | Token | Value | Usage |
 |-------|-------|-------|
 | `--rd-bg-base` | `#0a0a0a` | Solid base, primary button text on accent |
-| `--rd-bg-glass` | `rgba(255,255,255,0.08)` | Cards, FAB, dashboard |
-| `--rd-bg-glass-hover` | `rgba(255,255,255,0.12)` | Hover states |
-| `--rd-bg-glass-active` | `rgba(255,255,255,0.06)` | Active press (tabs, buttons) |
-| `--rd-glass-tint` | `rgba(120,160,255,0.04)` | Dashboard gradient tint |
-| `--rd-glass-border` | `rgba(255,255,255,0.1)` | Borders |
+| `--rd-bg-surface` | `rgba(14,14,16,0.92)` | Opaque underlay for FAB, dashboard, tooltips |
+| `--rd-bg-glass` | `rgba(255,255,255,0.1)` | Frosted overlay on elevated chrome |
+| `--rd-bg-glass-hover` | `rgba(255,255,255,0.15)` | Hover states |
+| `--rd-bg-glass-active` | `rgba(255,255,255,0.08)` | Active press (tabs, buttons) |
+| `--rd-glass-tint` | `rgba(120,160,255,0.06)` | Dashboard / FAB gradient tint |
+| `--rd-glass-border` | `rgba(255,255,255,0.18)` | Borders |
 | `--rd-accent` | `#6eb1ff` | Primary actions, active tab |
 | `--rd-success` | `#81c995` | Cached links, completed items |
 | `--rd-danger` | `#f28b82` | Errors, delete actions |
 | `--rd-warning` | `#fdd663` | In-progress, M3U badges |
-| `--rd-text-primary` | `#f0f0f0` | Body text |
-| `--rd-text-secondary` | `rgba(255,255,255,0.45)` | Meta, labels |
+| `--rd-text-primary` | `#f5f5f7` | Body text |
+| `--rd-text-secondary` | `rgba(255,255,255,0.68)` | Meta, labels |
+
+Elevated chrome (FAB, dashboard, sheet, tooltips) layers glass over `--rd-bg-surface` so light page backgrounds cannot wash out text.
 
 ## Shape & Elevation
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.0
+// @version      41.1
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -29,17 +29,19 @@
 // --- Step 1: CSS via GM_addStyle ---
 GM_addStyle(`:root {
             --rd-bg-base: #0a0a0a;
-            --rd-bg-glass: rgba(255, 255, 255, 0.08);
-            --rd-bg-glass-hover: rgba(255, 255, 255, 0.12);
-            --rd-bg-glass-active: rgba(255, 255, 255, 0.06);
-            --rd-glass-tint: rgba(120, 160, 255, 0.04);
+            /* Near-opaque dark underlay so glass stays readable on light pages */
+            --rd-bg-surface: rgba(14, 14, 16, 0.92);
+            --rd-bg-glass: rgba(255, 255, 255, 0.1);
+            --rd-bg-glass-hover: rgba(255, 255, 255, 0.15);
+            --rd-bg-glass-active: rgba(255, 255, 255, 0.08);
+            --rd-glass-tint: rgba(120, 160, 255, 0.06);
             --rd-glass-blur: blur(40px) saturate(180%);
-            --rd-glass-border: rgba(255, 255, 255, 0.1);
-            --rd-glass-highlight: inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
-            --rd-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-            --rd-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-            --rd-text-primary: #f0f0f0;
-            --rd-text-secondary: rgba(255, 255, 255, 0.45);
+            --rd-glass-border: rgba(255, 255, 255, 0.18);
+            --rd-glass-highlight: inset 0 0.5px 0 rgba(255, 255, 255, 0.18);
+            --rd-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+            --rd-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+            --rd-text-primary: #f5f5f7;
+            --rd-text-secondary: rgba(255, 255, 255, 0.68);
             --rd-accent: #6eb1ff;
             --rd-success: #81c995;
             --rd-danger: #f28b82;
@@ -55,6 +57,7 @@ GM_addStyle(`:root {
             position: fixed;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: var(--rd-text-primary);
             transition: all 0.3s ease;
         }
         #rd-ui-container * {
@@ -69,7 +72,7 @@ GM_addStyle(`:root {
             width: 46px;
             height: 46px;
             border-radius: 50%;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
             backdrop-filter: var(--rd-glass-blur);
             -webkit-backdrop-filter: var(--rd-glass-blur);
             border: 1px solid var(--rd-glass-border);
@@ -91,7 +94,7 @@ GM_addStyle(`:root {
             width: 52px;
             height: 52px;
             border-radius: 50%;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
             backdrop-filter: var(--rd-glass-blur);
             -webkit-backdrop-filter: var(--rd-glass-blur);
             border: 1px solid var(--rd-glass-border);
@@ -114,7 +117,7 @@ GM_addStyle(`:root {
             right: 30px;
             width: 400px;
             max-height: 580px;
-            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass));
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
             backdrop-filter: var(--rd-glass-blur);
             -webkit-backdrop-filter: var(--rd-glass-blur);
             border-radius: var(--rd-radius-lg);
@@ -122,6 +125,7 @@ GM_addStyle(`:root {
             flex-direction: column;
             border: 1px solid var(--rd-glass-border);
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow);
+            color: var(--rd-text-primary);
         }
         .rd-mobile-sheet {
             position: fixed;
@@ -129,7 +133,7 @@ GM_addStyle(`:root {
             left: 0;
             width: 100%;
             max-height: 85vh;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(180deg, var(--rd-bg-glass), transparent), var(--rd-bg-surface);
             backdrop-filter: var(--rd-glass-blur);
             -webkit-backdrop-filter: var(--rd-glass-blur);
             border-radius: var(--rd-radius-lg) var(--rd-radius-lg) 0 0;
@@ -138,13 +142,14 @@ GM_addStyle(`:root {
             border: 1px solid var(--rd-glass-border);
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow);
             transition: transform 0.3s ease;
+            color: var(--rd-text-primary);
         }
 
         /* Header */
         .rd-header {
             flex-shrink: 0;
             padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(60px);
             -webkit-backdrop-filter: blur(60px);
             border-bottom: 1px solid var(--rd-glass-border);
@@ -160,7 +165,7 @@ GM_addStyle(`:root {
             display: flex;
             padding: 4px;
             gap: 2px;
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.25);
             border-bottom: 1px solid var(--rd-glass-border);
         }
         .rd-tab {
@@ -207,7 +212,7 @@ GM_addStyle(`:root {
             align-items: center;
             justify-content: space-between;
             border-bottom: 1px solid var(--rd-glass-border);
-            background: var(--rd-bg-glass);
+            background: rgba(0, 0, 0, 0.28);
         }
         .rd-control-group {
             display: flex;
@@ -222,7 +227,7 @@ GM_addStyle(`:root {
         .rd-textarea {
             width: 100%;
             height: 72px;
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.35);
             border: 1px solid var(--rd-glass-border);
             color: var(--rd-text-primary);
             padding: 10px;
@@ -233,6 +238,10 @@ GM_addStyle(`:root {
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
+        .rd-textarea::placeholder {
+            color: var(--rd-text-secondary);
+            opacity: 1;
+        }
         .rd-textarea:focus {
             border-color: var(--rd-accent);
             box-shadow: 0 0 0 3px rgba(110, 177, 255, 0.15);
@@ -240,7 +249,7 @@ GM_addStyle(`:root {
         .rd-search-bar {
             width: 100%;
             height: auto;
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.35);
             border: 1px solid var(--rd-glass-border);
             color: var(--rd-text-primary);
             padding: 8px 12px;
@@ -250,6 +259,10 @@ GM_addStyle(`:root {
             font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .rd-search-bar::placeholder {
+            color: var(--rd-text-secondary);
+            opacity: 1;
         }
         .rd-search-bar:focus {
             border-color: var(--rd-accent);
@@ -318,7 +331,7 @@ GM_addStyle(`:root {
 
         /* List items (glass cards) */
         .rd-log-item {
-            background: var(--rd-bg-glass);
+            background: linear-gradient(180deg, var(--rd-bg-glass), transparent), rgba(0, 0, 0, 0.35);
             border-radius: var(--rd-radius-sm);
             padding: 10px;
             border: 1px solid var(--rd-glass-border);
@@ -328,6 +341,7 @@ GM_addStyle(`:root {
             gap: 10px;
             box-shadow: var(--rd-shadow-sm);
             transition: background 0.2s ease;
+            color: var(--rd-text-primary);
         }
         .rd-log-item:hover {
             background: var(--rd-bg-glass-hover);
@@ -380,9 +394,9 @@ GM_addStyle(`:root {
 
         /* Action buttons */
         .rd-action-btn {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.14);
             color: var(--rd-text-primary);
-            border: none;
+            border: 1px solid var(--rd-glass-border);
             padding: 4px 10px;
             border-radius: var(--rd-radius-xs);
             font-size: 10px;
@@ -392,7 +406,7 @@ GM_addStyle(`:root {
             white-space: nowrap;
         }
         .rd-action-btn:hover {
-            background: rgba(255, 255, 255, 0.16);
+            background: rgba(255, 255, 255, 0.22);
         }
         .rd-btn-group {
             display: flex;
@@ -521,12 +535,12 @@ GM_addStyle(`:root {
 
         /* Progress bars */
         .rd-progress-track {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(0, 0, 0, 0.4);
             height: 5px;
             border-radius: 3px;
             margin-top: 4px;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
         }
         .rd-progress-fill {
             height: 100%;
@@ -574,7 +588,7 @@ GM_addStyle(`:root {
         /* Tooltips */
         #rd-xray-tooltip {
             position: absolute;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
             backdrop-filter: blur(60px);
             -webkit-backdrop-filter: blur(60px);
             color: var(--rd-text-primary);
@@ -599,7 +613,7 @@ GM_addStyle(`:root {
         #rd-sel-tooltip {
             position: absolute;
             z-index: 9999999;
-            background: var(--rd-bg-glass);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
             backdrop-filter: blur(60px);
             -webkit-backdrop-filter: blur(60px);
             color: var(--rd-accent);
@@ -818,7 +832,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.0",
+  VERSION: "41.1",
   SETTINGS_VERSION: 2,
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.

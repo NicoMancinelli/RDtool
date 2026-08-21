@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.1] - 2026-08-21
+
+### Changed
+- **Widget contrast** — elevated chrome (FAB, dashboard, mobile sheet, tooltips) now layers glass over a near-opaque `--rd-bg-surface` underlay so light page backgrounds no longer wash out text.
+- **Token refresh** — stronger borders (`0.18`), secondary text (`0.68` opacity), primary text `#f5f5f7`, and darker input fills for readable meta labels and form fields on any host page.
+
 ## [40.2] - 2026-07-30
 
 ### Added
