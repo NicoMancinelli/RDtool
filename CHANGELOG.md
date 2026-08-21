@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.2] - 2026-08-21
+
+### Fixed
+- **Nagging init error banner** — `#rd-error-banner` no longer sticks forever on pages/frames where init fails. It is click-to-dismiss and auto-hides after 8s.
+- **`@noframes`** — script no longer injects into every iframe (ads/embeds), which was a common source of stray "failed to load" alerts.
+- **Scanner vs UI init** — scanner/history hook failures no longer present as a full "RD Suite failed to load" banner when the dashboard already mounted; they toast instead.
+- **Restricted history access** — SPA `pushState`/`replaceState` hooks are try/caught so opaque origins don't abort scanner setup.
+
 ## [41.1] - 2026-08-21
 
 ### Changed

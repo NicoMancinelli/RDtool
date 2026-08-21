@@ -15,7 +15,8 @@ export default defineConfig({
         // DOM-touching tests can either add the directive or use this glob.
         environmentMatchGlobs: [
             ['tests/media-jsdom*.test.mjs', 'jsdom'],
-            ['tests/ui-jsdom*.test.mjs', 'jsdom']
+            ['tests/ui-jsdom*.test.mjs', 'jsdom'],
+            ['tests/init-jsdom*.test.mjs', 'jsdom']
         ]
     }
 });
