@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.2] - 2026-08-21
+
+### Fixed
+- **Nagging init error banner** — `#rd-error-banner` no longer sticks forever on pages/frames where init fails. It is click-to-dismiss and auto-hides after 8s.
+- **`@noframes`** — script no longer injects into every iframe (ads/embeds), which was a common source of stray "failed to load" alerts.
+- **Scanner vs UI init** — scanner/history hook failures no longer present as a full "RD Suite failed to load" banner when the dashboard already mounted; they toast instead.
+- **Restricted history access** — SPA `pushState`/`replaceState` hooks are try/caught so opaque origins don't abort scanner setup.
+
+## [41.1] - 2026-08-21
+
+### Changed
+- **Widget contrast** — elevated chrome (FAB, dashboard, mobile sheet, tooltips) now layers glass over a near-opaque `--rd-bg-surface` underlay so light page backgrounds no longer wash out text.
+- **Token refresh** — stronger borders (`0.18`), secondary text (`0.68` opacity), primary text `#f5f5f7`, and darker input fills for readable meta labels and form fields on any host page.
+
 ## [40.2] - 2026-07-30
 
 ### Added

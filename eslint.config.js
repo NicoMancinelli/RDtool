@@ -63,7 +63,8 @@ export default [
         // slice. Tests in this scope still see vitest + node globals above.
         files: [
             'tests/media-jsdom.test.mjs',
-            'tests/ui-jsdom.test.mjs'
+            'tests/ui-jsdom.test.mjs',
+            'tests/init-jsdom.test.mjs'
         ],
         languageOptions: {
             globals: {

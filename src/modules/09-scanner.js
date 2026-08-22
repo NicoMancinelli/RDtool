@@ -58,9 +58,12 @@ const Scanner = {
             clearTimeout(this._scanTimer);
             this._scanTimer = setTimeout(() => this.scanPage(), 300);
         });
-        this._observer.observe(document.body, { childList: true, subtree: true });
+        if (document.body) {
+            this._observer.observe(document.body, { childList: true, subtree: true });
+        }
 
-        // SPA navigation detection
+        // SPA navigation detection — history monkey-patch can throw on
+        // restricted / opaque origins; fall back to polling alone.
         State.lastUrl = location.href;
         const onNav = () => {
             if (location.href === State.lastUrl) return;
@@ -75,10 +78,14 @@ const Scanner = {
         };
         window.addEventListener('popstate', onNav);
         window.addEventListener('hashchange', onNav);
-        const origPush = history.pushState;
-        const origReplace = history.replaceState;
-        history.pushState = function() { origPush.apply(this, arguments); onNav(); };
-        history.replaceState = function() { origReplace.apply(this, arguments); onNav(); };
+        try {
+            const origPush = history.pushState;
+            const origReplace = history.replaceState;
+            history.pushState = function() { origPush.apply(this, arguments); onNav(); };
+            history.replaceState = function() { origReplace.apply(this, arguments); onNav(); };
+        } catch (e) {
+            console.warn('[RD Suite] SPA history hooks unavailable:', e);
+        }
         setInterval(onNav, 2000);
 
         // Initial scan

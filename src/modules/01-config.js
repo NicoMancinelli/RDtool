@@ -2,7 +2,7 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.0",
+  VERSION: "41.2",
   SETTINGS_VERSION: 2,
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
