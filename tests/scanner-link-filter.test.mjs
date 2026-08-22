@@ -57,8 +57,10 @@ function loadPageContentHelpers(Config) {
         'getPageUrl\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
         'isHostFilePageUrl\\(url\\) \\{[\\s\\S]*?\\n {4}\\},',
         'hasPageActionableContent\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'getHostDownloadUrls\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
         'hasHostDownloadTarget\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
-        'getPrimaryHostDownloadUrl\\(\\) \\{[\\s\\S]*?\\n {4}\\},'
+        'getPrimaryHostDownloadUrl\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'cycleHostDownloadUrl\\(delta\\) \\{[\\s\\S]*?\\n {4}\\},'
     ];
     const methods = patterns.map((p) => {
         const m = scannerSrc.match(new RegExp(p));
@@ -67,7 +69,7 @@ function loadPageContentHelpers(Config) {
     }).join('\n    ');
     const fn = new Function(`
         const State = globalThis.State;
-        const Scanner = { ${methods} };
+        const Scanner = { _selectedHostDlUrl: null, _hostDlCheckUrl: '', _updatePageActionBar() {}, ${methods} };
         return Scanner;
     `);
     return fn();
@@ -197,9 +199,22 @@ describe('Scanner page content helpers', () => {
         expect(Scanner.getPrimaryHostDownloadUrl()).toBe('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html');
 
         globalThis.location = { href: 'https://forum.example/thread' };
+        Scanner._selectedHostDlUrl = null;
         globalThis.State.scannedLinksMap.set('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html', { type: 'host' });
         expect(Scanner.getPrimaryHostDownloadUrl()).toBe('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html');
         expect(Scanner.hasHostDownloadTarget()).toBe(true);
+    });
+
+    it('cycleHostDownloadUrl rotates among scanned host links', () => {
+        globalThis.location = { href: 'https://forum.example/thread' };
+        const a = 'https://rapidgator.net/file/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/a';
+        const b = 'https://rapidgator.net/file/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/b';
+        globalThis.State.scannedLinksMap.set(a, { type: 'host' });
+        globalThis.State.scannedLinksMap.set(b, { type: 'host' });
+        expect(Scanner.getHostDownloadUrls()).toEqual([a, b]);
+        expect(Scanner.getPrimaryHostDownloadUrl()).toBe(a);
+        expect(Scanner.cycleHostDownloadUrl(1)).toBe(b);
+        expect(Scanner.cycleHostDownloadUrl(1)).toBe(a);
     });
 });
 
