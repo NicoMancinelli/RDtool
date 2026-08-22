@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 - **Page download button** — fixed **Download via RD** control appears when the scanner finds a supported host link on any page (not only when the open tab is itself a file URL).
 - **Smart corner widget** — the FAB stays hidden until the page has a supported host link, magnet link, `.torrent` URL, or you are on a host file page. Opens into the full dashboard on click.
 - **`.torrent` link detection** — HTTP(S) links ending in `.torrent` are scanned, counted for the widget badge, and can be fetched + uploaded from the Page tab.
+- **Download button link check** — the page **Download via RD** button calls Real-Debrid `/unrestrict/check` and shows a colored status dot: green = supported file (hover for name/size), yellow = unsupported, red = host offline or check failed, pulsing gray while checking. Reuses the same cache as inline x-ray icons.
 
 ### Changed
 - FAB visibility is now always content-based (independent of whether the dashboard was manually opened before).

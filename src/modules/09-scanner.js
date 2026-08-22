@@ -5,6 +5,8 @@ const Scanner = {
     _observer: null,
     _linksScannedThisPass: 0,
     _HOST_RE: /^(?:https?|magnet):\/\/([^/]+)/i,
+    _hostDlCheckToken: 0,
+    _hostDlCheckUrl: '',
 
     // Releases the MutationObserver. Currently a no-op at runtime (Tampermonkey
     // owns the page lifecycle), but exposed for future HMR / SPA-unmount paths.
@@ -307,18 +309,93 @@ const Scanner = {
                     Scanner._onHostPageDownloadClick();
                 }
             }, [
+                DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
                 DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
                 DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
             ]);
             document.body.appendChild(btn);
         }
 
+        btn.dataset.linkUrl = url;
         btn.classList.toggle('rd-offline', !!isDown);
         btn.disabled = !!isDown || btn.classList.contains('rd-busy');
-        btn.title = isDown
-            ? ((hostObj && hostObj.name) || hostDomain) + ' is offline'
-            : 'Unrestrict with Real-Debrid';
+
+        if (isDown) {
+            this._setHostDownloadStatus(btn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
+        } else {
+            btn.title = 'Unrestrict with Real-Debrid';
+            this._refreshHostDownloadCheck(url);
+        }
         UI.updateFabVisibility();
+    },
+
+    /** Map /unrestrict/check response to button status. */
+    _mapUnrestrictCheck(ok, data) {
+        if (!ok || !data) return { status: 'error', detail: 'Could not verify link' };
+        if (data.supported) {
+            let detail = data.filename || 'Supported file';
+            if (data.filesize) detail += ' \u2014 ' + formatBytes(data.filesize);
+            return { status: 'valid', detail };
+        }
+        return { status: 'invalid', detail: 'Not supported or link unavailable' };
+    },
+
+    _setHostDownloadStatus(btn, status, detail) {
+        if (!btn) return;
+        let dot = btn.querySelector('.rd-host-dl-status');
+        if (!dot) {
+            dot = DOM.create('span', { className: 'rd-host-dl-status', 'aria-hidden': 'true' });
+            btn.insertBefore(dot, btn.firstChild);
+        }
+        dot.dataset.status = status;
+        const tips = {
+            checking: 'Checking link with Real-Debrid…',
+            valid: detail ? detail + ' — click to download' : 'Supported — ready to download',
+            invalid: detail || 'Link not supported by Real-Debrid',
+            offline: detail || 'Host is offline',
+            error: detail || 'Could not verify link'
+        };
+        btn.title = tips[status] || 'Download via Real-Debrid';
+        dot.title = btn.title;
+    },
+
+    async _refreshHostDownloadCheck(url) {
+        if (!url) return;
+        const btn = document.getElementById('rd-host-dl-btn');
+        if (!btn || btn.dataset.linkUrl !== url) return;
+
+        if (this._hostDlCheckUrl === url) {
+            const cur = btn.querySelector('.rd-host-dl-status');
+            if (cur && cur.dataset.status && cur.dataset.status !== 'checking') return;
+        }
+        this._hostDlCheckUrl = url;
+        const token = ++this._hostDlCheckToken;
+
+        this._setHostDownloadStatus(btn, 'checking');
+
+        const cachedStatus = State.pageLinkCache.get(url);
+        if (cachedStatus === 'cached' && State.linkCheckCache.has(url)) {
+            this._setHostDownloadStatus(btn, 'valid', State.linkCheckCache.get(url));
+            return;
+        }
+        if (cachedStatus === 'uncached') {
+            this._setHostDownloadStatus(btn, 'invalid', State.linkCheckCache.get(url) || 'Not supported or link unavailable');
+            return;
+        }
+
+        const { ok, data } = await API.post('/unrestrict/check', { link: url });
+        if (token !== this._hostDlCheckToken) return;
+        if (!document.getElementById('rd-host-dl-btn') || btn.dataset.linkUrl !== url) return;
+
+        const mapped = this._mapUnrestrictCheck(ok, data);
+        if (mapped.status === 'valid') {
+            State.pageLinkCache.set(url, 'cached');
+            State.linkCheckCache.set(url, mapped.detail);
+        } else if (mapped.status === 'invalid') {
+            State.pageLinkCache.set(url, 'uncached');
+            State.linkCheckCache.set(url, mapped.detail);
+        }
+        this._setHostDownloadStatus(btn, mapped.status, mapped.detail);
     },
 
     async _onHostPageDownloadClick() {
@@ -348,6 +425,8 @@ const Scanner = {
     removeHostPageButton() {
         const btn = document.getElementById('rd-host-dl-btn');
         if (btn) btn.remove();
+        this._hostDlCheckUrl = '';
+        this._hostDlCheckToken++;
     },
 
     /** Raw href attribute is scannable (not # / javascript: / empty). */

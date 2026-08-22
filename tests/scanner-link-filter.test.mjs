@@ -211,3 +211,39 @@ describe('torrent URL detection', () => {
         expect(isTorrentFileUrl('https://example.com/files/movie.mkv')).toBe(false);
     });
 });
+
+function loadMapUnrestrictCheck() {
+    const match = scannerSrc.match(/_mapUnrestrictCheck\(ok, data\) \{[\s\S]*?\n {4}\},/);
+    if (!match) throw new Error('_mapUnrestrictCheck not found');
+    const fn = new Function(`
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+        const Scanner = { ${match[0]} };
+        return Scanner._mapUnrestrictCheck.bind(Scanner);
+    `);
+    return fn();
+}
+
+describe('Scanner._mapUnrestrictCheck', () => {
+    const map = loadMapUnrestrictCheck();
+
+    it('marks supported files as valid with filename and size', () => {
+        const res = map(true, { supported: true, filename: 'movie.mkv', filesize: 1073741824 });
+        expect(res.status).toBe('valid');
+        expect(res.detail).toContain('movie.mkv');
+        expect(res.detail).toContain('GB');
+    });
+
+    it('marks unsupported links as invalid', () => {
+        expect(map(true, { supported: false }).status).toBe('invalid');
+    });
+
+    it('marks API failures as error', () => {
+        expect(map(false, null).status).toBe('error');
+    });
+});
