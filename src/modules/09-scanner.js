@@ -34,6 +34,7 @@ const Scanner = {
                     State.hostsFetchFailed = true;
                 }
                 if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
+                Scanner._updateHostPageButton();
             }),
             API.get('/hosts/status').then(({ ok, data }) => {
                 if (ok && data) State.liveHosts = data;
@@ -46,6 +47,7 @@ const Scanner = {
                         Config.hostRegex = Config.getActiveRegex();
                     }
                 }
+                Scanner._updateHostPageButton();
             }) : Promise.resolve(),
             useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
                 if (ok && data) {
@@ -81,8 +83,10 @@ const Scanner = {
             State.pageCollapsedDomains.clear();
             document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
+            Scanner.removeHostPageButton();
             UI.updateBadge(0);
             this.scanPage();
+            this._updateHostPageButton();
         };
         window.addEventListener('popstate', onNav);
         window.addEventListener('hashchange', onNav);
@@ -98,6 +102,7 @@ const Scanner = {
 
         // Initial scan
         this.scanPage();
+        this._updateHostPageButton();
 
         // Selection tooltip
         this._initSelectionTooltip();
@@ -198,6 +203,97 @@ const Scanner = {
                 this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
             }
         }
+    },
+
+    /** Current page URL without hash fragment. */
+    getPageUrl() {
+        try {
+            return (location.href || '').split('#')[0];
+        } catch (_) {
+            return '';
+        }
+    },
+
+    /** True when the open tab is itself a supported host file link. */
+    isHostFilePageUrl(url) {
+        if (!url || !Config.hostRegex) return false;
+        const clean = url.split('#')[0];
+        if (!/^https?:/i.test(clean)) return false;
+        return Config.hostRegex.test(clean);
+    },
+
+    /** One fixed download control on host file pages (e.g. Rapidgator /file/…). */
+    _updateHostPageButton() {
+        if (!State.apiKey) {
+            this.removeHostPageButton();
+            return;
+        }
+        const url = this.getPageUrl();
+        if (!this.isHostFilePageUrl(url)) {
+            this.removeHostPageButton();
+            return;
+        }
+
+        const hostMatch = url.match(Scanner._HOST_RE);
+        const hostDomain = hostMatch ? hostMatch[1].replace(/^www\./, '') : '';
+        const hostObj = hostDomain
+            ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
+            : null;
+        const isDown = hostObj && hostObj.status === 'down';
+
+        let btn = document.getElementById('rd-host-dl-btn');
+        if (!btn) {
+            btn = DOM.create('button', {
+                id: 'rd-host-dl-btn',
+                className: 'rd-host-dl-btn',
+                type: 'button',
+                title: 'Unrestrict this file with Real-Debrid',
+                onClick: (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    Scanner._onHostPageDownloadClick();
+                }
+            }, [
+                DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
+                DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+            ]);
+            document.body.appendChild(btn);
+        }
+
+        btn.classList.toggle('rd-offline', !!isDown);
+        btn.disabled = !!isDown || btn.classList.contains('rd-busy');
+        btn.title = isDown
+            ? ((hostObj && hostObj.name) || hostDomain) + ' is offline'
+            : 'Unrestrict this file with Real-Debrid';
+    },
+
+    async _onHostPageDownloadClick() {
+        const btn = document.getElementById('rd-host-dl-btn');
+        const url = this.getPageUrl();
+        if (!url || (btn && (btn.disabled || btn.classList.contains('rd-busy')))) return;
+
+        const label = btn && btn.querySelector('.rd-host-dl-label');
+        if (btn) {
+            btn.classList.add('rd-busy');
+            btn.disabled = true;
+            if (label) label.textContent = 'Working\u2026';
+        }
+
+        try {
+            await unrestrictLinkOrFolder(url);
+        } finally {
+            if (btn) {
+                btn.classList.remove('rd-busy');
+                btn.disabled = false;
+                if (label) label.textContent = 'Download via RD';
+                this._updateHostPageButton();
+            }
+        }
+    },
+
+    removeHostPageButton() {
+        const btn = document.getElementById('rd-host-dl-btn');
+        if (btn) btn.remove();
     },
 
     /** Raw href attribute is scannable (not # / javascript: / empty). */

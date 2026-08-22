@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.4] - 2026-08-22
+
+### Added
+- **Host file page download button** — when the open tab is itself a supported host file URL (e.g. Rapidgator `/file/…`), RDtool shows one fixed **Download via RD** control (bottom-left) instead of relying on inline ⚡ icons on every UI control.
+
 ## [41.3] - 2026-08-22
 
 ### Fixed

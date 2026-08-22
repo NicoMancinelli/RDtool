@@ -37,6 +37,41 @@ function loadIsScannableHref() {
     return fn();
 }
 
+function loadIsHostFilePageUrl(Config) {
+    globalThis.Config = Config;
+    const match = scannerSrc.match(/isHostFilePageUrl\(url\) \{[\s\S]*?\n {4}\},/);
+    if (!match) throw new Error('isHostFilePageUrl not found');
+    const fn = new Function(`
+        const Scanner = { ${match[0]} };
+        return Scanner.isHostFilePageUrl.bind(Scanner);
+    `);
+    return fn();
+}
+
+describe('Scanner.isHostFilePageUrl — host file tab detection', () => {
+    let Config;
+    let isHostFilePageUrl;
+
+    beforeEach(() => {
+        Config = loadConfig();
+        globalThis.State = { settings: { useApiHostRegex: false }, dynamicHosts: [] };
+        Config.hostRegex = Config.getActiveRegex();
+        isHostFilePageUrl = loadIsHostFilePageUrl(Config);
+    });
+
+    it('matches Rapidgator file pages', () => {
+        expect(isHostFilePageUrl('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html')).toBe(true);
+        expect(isHostFilePageUrl('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html#section')).toBe(true);
+    });
+
+    it('rejects host site chrome and non-file URLs', () => {
+        expect(isHostFilePageUrl('https://rapidgator.net/auth/login')).toBe(false);
+        expect(isHostFilePageUrl('https://rapidgator.net/article/premium')).toBe(false);
+        expect(isHostFilePageUrl('https://example.com/page')).toBe(false);
+        expect(isHostFilePageUrl('')).toBe(false);
+    });
+});
+
 describe('Scanner.isScannableHref — Rapidgator # clutter', () => {
     const isScannableHref = loadIsScannableHref();
 
