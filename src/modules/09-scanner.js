@@ -36,7 +36,7 @@ const Scanner = {
                     State.hostsFetchFailed = true;
                 }
                 if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
-                Scanner._updateHostPageButton();
+                Scanner._updatePageActionBar();
             }),
             API.get('/hosts/status').then(({ ok, data }) => {
                 if (ok && data) State.liveHosts = data;
@@ -49,7 +49,7 @@ const Scanner = {
                         Config.hostRegex = Config.getActiveRegex();
                     }
                 }
-                Scanner._updateHostPageButton();
+                Scanner._updatePageActionBar();
             }) : Promise.resolve(),
             useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
                 if (ok && data) {
@@ -85,11 +85,11 @@ const Scanner = {
             State.pageCollapsedDomains.clear();
             document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
-            Scanner.removeHostPageButton();
+            Scanner.removePageActionBar();
             UI.updateBadge(0);
             UI.updateFabVisibility();
             this.scanPage();
-            this._updateHostPageButton();
+            this._updatePageActionBar();
         };
         window.addEventListener('popstate', onNav);
         window.addEventListener('hashchange', onNav);
@@ -105,7 +105,7 @@ const Scanner = {
 
         // Initial scan
         this.scanPage();
-        this._updateHostPageButton();
+        this._updatePageActionBar();
 
         // Selection tooltip
         this._initSelectionTooltip();
@@ -224,7 +224,7 @@ const Scanner = {
         }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
-            this._updateHostPageButton();
+            this._updatePageActionBar();
             UI.updateFabVisibility();
             if (State.currentTab === 'page' && State.isExpanded) {
                 clearTimeout(this._pageRefreshTimer);
@@ -275,58 +275,103 @@ const Scanner = {
         return null;
     },
 
-    /** One fixed download control when a supported host link is on the page. */
-    _updateHostPageButton() {
-        if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
-            this.removeHostPageButton();
-            UI.updateFabVisibility();
-            return;
-        }
-        const url = this.getPrimaryHostDownloadUrl();
-        if (!url) {
-            this.removeHostPageButton();
+    /** Top-right bar: download (when host link) + expand into full widget. */
+    _updatePageActionBar() {
+        if (!State.apiKey || !this.hasPageActionableContent() || State.isExpanded) {
+            this.removePageActionBar();
             UI.updateFabVisibility();
             return;
         }
 
-        const hostMatch = url.match(Scanner._HOST_RE);
-        const hostDomain = hostMatch ? hostMatch[1].replace(/^www\./, '') : '';
-        const hostObj = hostDomain
-            ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
-            : null;
-        const isDown = hostObj && hostObj.status === 'down';
+        let bar = document.getElementById('rd-page-action-bar');
+        if (!bar) {
+            bar = DOM.create('div', { id: 'rd-page-action-bar', className: 'rd-page-action-bar' });
+            document.body.appendChild(bar);
+        }
 
-        let btn = document.getElementById('rd-host-dl-btn');
-        if (!btn) {
-            btn = DOM.create('button', {
-                id: 'rd-host-dl-btn',
-                className: 'rd-host-dl-btn',
+        const showDownload = State.settings.hostPageDownloadButton !== false && this.hasHostDownloadTarget();
+        const url = showDownload ? this.getPrimaryHostDownloadUrl() : null;
+
+        let dlBtn = document.getElementById('rd-host-dl-btn');
+        if (showDownload && url) {
+            const hostMatch = url.match(Scanner._HOST_RE);
+            const hostDomain = hostMatch ? hostMatch[1].replace(/^www\./, '') : '';
+            const hostObj = hostDomain
+                ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
+                : null;
+            const isDown = hostObj && hostObj.status === 'down';
+
+            if (!dlBtn) {
+                dlBtn = DOM.create('button', {
+                    id: 'rd-host-dl-btn',
+                    className: 'rd-host-dl-btn',
+                    type: 'button',
+                    title: 'Unrestrict this file with Real-Debrid',
+                    onClick: (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        Scanner._onHostPageDownloadClick();
+                    }
+                }, [
+                    DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
+                    DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
+                    DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+                ]);
+            }
+
+            dlBtn.dataset.linkUrl = url;
+            dlBtn.classList.toggle('rd-offline', !!isDown);
+            dlBtn.disabled = !!isDown || dlBtn.classList.contains('rd-busy');
+
+            if (isDown) {
+                this._setHostDownloadStatus(dlBtn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
+            } else {
+                dlBtn.title = 'Unrestrict with Real-Debrid';
+                this._refreshHostDownloadCheck(url);
+            }
+            bar.appendChild(dlBtn);
+        } else if (dlBtn) {
+            dlBtn.remove();
+            this._hostDlCheckUrl = '';
+            this._hostDlCheckToken++;
+        }
+
+        let expandBtn = document.getElementById('rd-page-expand-btn');
+        if (!expandBtn) {
+            expandBtn = DOM.create('button', {
+                id: 'rd-page-expand-btn',
+                className: 'rd-page-expand-btn',
                 type: 'button',
-                title: 'Unrestrict this file with Real-Debrid',
+                title: 'Open RD Suite',
                 onClick: (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    Scanner._onHostPageDownloadClick();
+                    if (State.scannedLinksMap.size > 0) {
+                        UI.openTab(Config.TAB_KEYS.PAGE);
+                    } else {
+                        UI.toggleDashboard(true);
+                    }
                 }
             }, [
-                DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
-                DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
-                DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+                DOM.create('span', { className: 'rd-page-expand-icon', textContent: '\u2922' }),
+                DOM.create('span', { className: 'rd-page-expand-badge', id: 'rd-page-expand-badge', textContent: '' })
             ]);
-            document.body.appendChild(btn);
         }
 
-        btn.dataset.linkUrl = url;
-        btn.classList.toggle('rd-offline', !!isDown);
-        btn.disabled = !!isDown || btn.classList.contains('rd-busy');
-
-        if (isDown) {
-            this._setHostDownloadStatus(btn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
-        } else {
-            btn.title = 'Unrestrict with Real-Debrid';
-            this._refreshHostDownloadCheck(url);
+        const count = State.scannedLinksMap.size;
+        const expandBadge = expandBtn.querySelector('#rd-page-expand-badge');
+        if (expandBadge) {
+            expandBadge.textContent = count > 0 ? (count > 99 ? '99+' : String(count)) : '';
+            expandBadge.classList.toggle('visible', count > 0);
         }
+        expandBtn.title = count > 0 ? 'Open RD Suite (' + count + ' link' + (count === 1 ? '' : 's') + ')' : 'Open RD Suite';
+        bar.appendChild(expandBtn);
+
         UI.updateFabVisibility();
+    },
+
+    _updateHostPageButton() {
+        this._updatePageActionBar();
     },
 
     /** Map /unrestrict/check response to button status. */
@@ -417,16 +462,20 @@ const Scanner = {
                 btn.classList.remove('rd-busy');
                 btn.disabled = false;
                 if (label) label.textContent = 'Download via RD';
-                this._updateHostPageButton();
+                this._updatePageActionBar();
             }
         }
     },
 
-    removeHostPageButton() {
-        const btn = document.getElementById('rd-host-dl-btn');
-        if (btn) btn.remove();
+    removePageActionBar() {
+        const bar = document.getElementById('rd-page-action-bar');
+        if (bar) bar.remove();
         this._hostDlCheckUrl = '';
         this._hostDlCheckToken++;
+    },
+
+    removeHostPageButton() {
+        this.removePageActionBar();
     },
 
     /** Raw href attribute is scannable (not # / javascript: / empty). */

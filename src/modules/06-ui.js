@@ -305,6 +305,7 @@
 
             if (show) {
                 State.isExpanded = true;
+                if (typeof Scanner !== 'undefined' && Scanner.removePageActionBar) Scanner.removePageActionBar();
                 if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
                     const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
@@ -337,6 +338,7 @@
 
                 UI.renderFAB();
                 UI.updateBadge(State.scannedLinksMap.size);
+                if (typeof Scanner !== 'undefined' && Scanner._updatePageActionBar) Scanner._updatePageActionBar();
             }
         },
 
@@ -609,6 +611,10 @@
         updateFabVisibility() {
             const container = document.getElementById('rd-ui-container');
             if (!container || !State.apiKey || State.isExpanded) return;
+            if (document.getElementById('rd-page-action-bar')) {
+                container.classList.add('rd-hidden');
+                return;
+            }
             const show = typeof Scanner !== 'undefined'
                 && Scanner.hasPageActionableContent
                 && Scanner.hasPageActionableContent();

@@ -556,16 +556,23 @@
             color: var(--rd-danger);
         }
 
-        /* Host file page — single download shortcut */
-        .rd-host-dl-btn {
+        /* Page action bar — top-right download + expand */
+        .rd-page-action-bar {
             position: fixed;
-            bottom: 30px;
-            left: 30px;
+            top: calc(16px + env(safe-area-inset-top, 0px));
+            right: calc(16px + env(safe-area-inset-right, 0px));
             z-index: 999998;
-            display: inline-flex;
+            display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
+            gap: 6px;
+            max-width: min(420px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+        }
+        .rd-host-dl-btn {
+            position: static;
+            min-width: 0;
+            flex: 1 1 auto;
+            max-width: 100%;
+            padding: 8px 12px;
             border-radius: var(--rd-radius-sm);
             border: 1px solid var(--rd-glass-border);
             background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
@@ -578,6 +585,63 @@
             cursor: pointer;
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
             transition: box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .rd-page-expand-btn {
+            position: relative;
+            flex: 0 0 auto;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--rd-radius-sm);
+            border: 1px solid var(--rd-glass-border);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
+            backdrop-filter: var(--rd-glass-blur);
+            -webkit-backdrop-filter: var(--rd-glass-blur);
+            color: var(--rd-text-primary);
+            cursor: pointer;
+            box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+        .rd-page-expand-btn:hover {
+            box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm), 0 0 16px rgba(110, 177, 255, 0.18);
+            transform: translateY(-1px);
+        }
+        .rd-page-expand-icon {
+            color: var(--rd-accent);
+            font-size: 16px;
+            line-height: 1;
+            font-weight: 700;
+        }
+        .rd-page-expand-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: var(--rd-accent);
+            color: var(--rd-bg-base);
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 16px;
+            text-align: center;
+            display: none;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        }
+        .rd-page-expand-badge.visible {
+            display: block;
+        }
+        .rd-host-dl-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .rd-host-dl-btn:hover:not(:disabled) {
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm), 0 0 20px rgba(110, 177, 255, 0.2);
@@ -630,10 +694,15 @@
             50% { opacity: 1; transform: scale(1); }
         }
         @media (max-width: 640px) {
+            .rd-page-action-bar {
+                top: calc(12px + env(safe-area-inset-top, 0px));
+                right: calc(12px + env(safe-area-inset-right, 0px));
+                left: calc(12px + env(safe-area-inset-left, 0px));
+                max-width: none;
+            }
             .rd-host-dl-btn {
-                bottom: calc(88px + env(safe-area-inset-bottom));
-                left: calc(16px + env(safe-area-inset-left));
-                max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+                font-size: 11px;
+                padding: 8px 10px;
             }
         }
 

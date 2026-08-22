@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.7
+// @version      41.8
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -589,16 +589,23 @@ GM_addStyle(`:root {
             color: var(--rd-danger);
         }
 
-        /* Host file page — single download shortcut */
-        .rd-host-dl-btn {
+        /* Page action bar — top-right download + expand */
+        .rd-page-action-bar {
             position: fixed;
-            bottom: 30px;
-            left: 30px;
+            top: calc(16px + env(safe-area-inset-top, 0px));
+            right: calc(16px + env(safe-area-inset-right, 0px));
             z-index: 999998;
-            display: inline-flex;
+            display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
+            gap: 6px;
+            max-width: min(420px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+        }
+        .rd-host-dl-btn {
+            position: static;
+            min-width: 0;
+            flex: 1 1 auto;
+            max-width: 100%;
+            padding: 8px 12px;
             border-radius: var(--rd-radius-sm);
             border: 1px solid var(--rd-glass-border);
             background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
@@ -611,6 +618,63 @@ GM_addStyle(`:root {
             cursor: pointer;
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
             transition: box-shadow 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .rd-page-expand-btn {
+            position: relative;
+            flex: 0 0 auto;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--rd-radius-sm);
+            border: 1px solid var(--rd-glass-border);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
+            backdrop-filter: var(--rd-glass-blur);
+            -webkit-backdrop-filter: var(--rd-glass-blur);
+            color: var(--rd-text-primary);
+            cursor: pointer;
+            box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+        .rd-page-expand-btn:hover {
+            box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm), 0 0 16px rgba(110, 177, 255, 0.18);
+            transform: translateY(-1px);
+        }
+        .rd-page-expand-icon {
+            color: var(--rd-accent);
+            font-size: 16px;
+            line-height: 1;
+            font-weight: 700;
+        }
+        .rd-page-expand-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: var(--rd-accent);
+            color: var(--rd-bg-base);
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 16px;
+            text-align: center;
+            display: none;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        }
+        .rd-page-expand-badge.visible {
+            display: block;
+        }
+        .rd-host-dl-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .rd-host-dl-btn:hover:not(:disabled) {
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm), 0 0 20px rgba(110, 177, 255, 0.2);
@@ -663,10 +727,15 @@ GM_addStyle(`:root {
             50% { opacity: 1; transform: scale(1); }
         }
         @media (max-width: 640px) {
+            .rd-page-action-bar {
+                top: calc(12px + env(safe-area-inset-top, 0px));
+                right: calc(12px + env(safe-area-inset-right, 0px));
+                left: calc(12px + env(safe-area-inset-left, 0px));
+                max-width: none;
+            }
             .rd-host-dl-btn {
-                bottom: calc(88px + env(safe-area-inset-bottom));
-                left: calc(16px + env(safe-area-inset-left));
-                max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+                font-size: 11px;
+                padding: 8px 10px;
             }
         }
 
@@ -917,7 +986,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.7",
+  VERSION: "41.8",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -2144,6 +2213,7 @@ const Config = {
 
             if (show) {
                 State.isExpanded = true;
+                if (typeof Scanner !== 'undefined' && Scanner.removePageActionBar) Scanner.removePageActionBar();
                 if (State.settings.rememberDashboardOpen) GM_setValue('rd_dashboard_open', true);
                 if (State.settings.rememberLastTab) {
                     const lastTab = GM_getValue('rd_last_tab', Config.TAB_KEYS.LINKS);
@@ -2176,6 +2246,7 @@ const Config = {
 
                 UI.renderFAB();
                 UI.updateBadge(State.scannedLinksMap.size);
+                if (typeof Scanner !== 'undefined' && Scanner._updatePageActionBar) Scanner._updatePageActionBar();
             }
         },
 
@@ -2448,6 +2519,10 @@ const Config = {
         updateFabVisibility() {
             const container = document.getElementById('rd-ui-container');
             if (!container || !State.apiKey || State.isExpanded) return;
+            if (document.getElementById('rd-page-action-bar')) {
+                container.classList.add('rd-hidden');
+                return;
+            }
             const show = typeof Scanner !== 'undefined'
                 && Scanner.hasPageActionableContent
                 && Scanner.hasPageActionableContent();
@@ -4657,7 +4732,7 @@ const Scanner = {
                     State.hostsFetchFailed = true;
                 }
                 if (Tabs.Settings && Tabs.Settings._updateHostsIndicator) Tabs.Settings._updateHostsIndicator();
-                Scanner._updateHostPageButton();
+                Scanner._updatePageActionBar();
             }),
             API.get('/hosts/status').then(({ ok, data }) => {
                 if (ok && data) State.liveHosts = data;
@@ -4670,7 +4745,7 @@ const Scanner = {
                         Config.hostRegex = Config.getActiveRegex();
                     }
                 }
-                Scanner._updateHostPageButton();
+                Scanner._updatePageActionBar();
             }) : Promise.resolve(),
             useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
                 if (ok && data) {
@@ -4706,11 +4781,11 @@ const Scanner = {
             State.pageCollapsedDomains.clear();
             document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
-            Scanner.removeHostPageButton();
+            Scanner.removePageActionBar();
             UI.updateBadge(0);
             UI.updateFabVisibility();
             this.scanPage();
-            this._updateHostPageButton();
+            this._updatePageActionBar();
         };
         window.addEventListener('popstate', onNav);
         window.addEventListener('hashchange', onNav);
@@ -4726,7 +4801,7 @@ const Scanner = {
 
         // Initial scan
         this.scanPage();
-        this._updateHostPageButton();
+        this._updatePageActionBar();
 
         // Selection tooltip
         this._initSelectionTooltip();
@@ -4845,7 +4920,7 @@ const Scanner = {
         }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
-            this._updateHostPageButton();
+            this._updatePageActionBar();
             UI.updateFabVisibility();
             if (State.currentTab === 'page' && State.isExpanded) {
                 clearTimeout(this._pageRefreshTimer);
@@ -4896,58 +4971,103 @@ const Scanner = {
         return null;
     },
 
-    /** One fixed download control when a supported host link is on the page. */
-    _updateHostPageButton() {
-        if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
-            this.removeHostPageButton();
-            UI.updateFabVisibility();
-            return;
-        }
-        const url = this.getPrimaryHostDownloadUrl();
-        if (!url) {
-            this.removeHostPageButton();
+    /** Top-right bar: download (when host link) + expand into full widget. */
+    _updatePageActionBar() {
+        if (!State.apiKey || !this.hasPageActionableContent() || State.isExpanded) {
+            this.removePageActionBar();
             UI.updateFabVisibility();
             return;
         }
 
-        const hostMatch = url.match(Scanner._HOST_RE);
-        const hostDomain = hostMatch ? hostMatch[1].replace(/^www\./, '') : '';
-        const hostObj = hostDomain
-            ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
-            : null;
-        const isDown = hostObj && hostObj.status === 'down';
+        let bar = document.getElementById('rd-page-action-bar');
+        if (!bar) {
+            bar = DOM.create('div', { id: 'rd-page-action-bar', className: 'rd-page-action-bar' });
+            document.body.appendChild(bar);
+        }
 
-        let btn = document.getElementById('rd-host-dl-btn');
-        if (!btn) {
-            btn = DOM.create('button', {
-                id: 'rd-host-dl-btn',
-                className: 'rd-host-dl-btn',
+        const showDownload = State.settings.hostPageDownloadButton !== false && this.hasHostDownloadTarget();
+        const url = showDownload ? this.getPrimaryHostDownloadUrl() : null;
+
+        let dlBtn = document.getElementById('rd-host-dl-btn');
+        if (showDownload && url) {
+            const hostMatch = url.match(Scanner._HOST_RE);
+            const hostDomain = hostMatch ? hostMatch[1].replace(/^www\./, '') : '';
+            const hostObj = hostDomain
+                ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
+                : null;
+            const isDown = hostObj && hostObj.status === 'down';
+
+            if (!dlBtn) {
+                dlBtn = DOM.create('button', {
+                    id: 'rd-host-dl-btn',
+                    className: 'rd-host-dl-btn',
+                    type: 'button',
+                    title: 'Unrestrict this file with Real-Debrid',
+                    onClick: (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        Scanner._onHostPageDownloadClick();
+                    }
+                }, [
+                    DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
+                    DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
+                    DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+                ]);
+            }
+
+            dlBtn.dataset.linkUrl = url;
+            dlBtn.classList.toggle('rd-offline', !!isDown);
+            dlBtn.disabled = !!isDown || dlBtn.classList.contains('rd-busy');
+
+            if (isDown) {
+                this._setHostDownloadStatus(dlBtn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
+            } else {
+                dlBtn.title = 'Unrestrict with Real-Debrid';
+                this._refreshHostDownloadCheck(url);
+            }
+            bar.appendChild(dlBtn);
+        } else if (dlBtn) {
+            dlBtn.remove();
+            this._hostDlCheckUrl = '';
+            this._hostDlCheckToken++;
+        }
+
+        let expandBtn = document.getElementById('rd-page-expand-btn');
+        if (!expandBtn) {
+            expandBtn = DOM.create('button', {
+                id: 'rd-page-expand-btn',
+                className: 'rd-page-expand-btn',
                 type: 'button',
-                title: 'Unrestrict this file with Real-Debrid',
+                title: 'Open RD Suite',
                 onClick: (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    Scanner._onHostPageDownloadClick();
+                    if (State.scannedLinksMap.size > 0) {
+                        UI.openTab(Config.TAB_KEYS.PAGE);
+                    } else {
+                        UI.toggleDashboard(true);
+                    }
                 }
             }, [
-                DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
-                DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
-                DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+                DOM.create('span', { className: 'rd-page-expand-icon', textContent: '\u2922' }),
+                DOM.create('span', { className: 'rd-page-expand-badge', id: 'rd-page-expand-badge', textContent: '' })
             ]);
-            document.body.appendChild(btn);
         }
 
-        btn.dataset.linkUrl = url;
-        btn.classList.toggle('rd-offline', !!isDown);
-        btn.disabled = !!isDown || btn.classList.contains('rd-busy');
-
-        if (isDown) {
-            this._setHostDownloadStatus(btn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
-        } else {
-            btn.title = 'Unrestrict with Real-Debrid';
-            this._refreshHostDownloadCheck(url);
+        const count = State.scannedLinksMap.size;
+        const expandBadge = expandBtn.querySelector('#rd-page-expand-badge');
+        if (expandBadge) {
+            expandBadge.textContent = count > 0 ? (count > 99 ? '99+' : String(count)) : '';
+            expandBadge.classList.toggle('visible', count > 0);
         }
+        expandBtn.title = count > 0 ? 'Open RD Suite (' + count + ' link' + (count === 1 ? '' : 's') + ')' : 'Open RD Suite';
+        bar.appendChild(expandBtn);
+
         UI.updateFabVisibility();
+    },
+
+    _updateHostPageButton() {
+        this._updatePageActionBar();
     },
 
     /** Map /unrestrict/check response to button status. */
@@ -5038,16 +5158,20 @@ const Scanner = {
                 btn.classList.remove('rd-busy');
                 btn.disabled = false;
                 if (label) label.textContent = 'Download via RD';
-                this._updateHostPageButton();
+                this._updatePageActionBar();
             }
         }
     },
 
-    removeHostPageButton() {
-        const btn = document.getElementById('rd-host-dl-btn');
-        if (btn) btn.remove();
+    removePageActionBar() {
+        const bar = document.getElementById('rd-page-action-bar');
+        if (bar) bar.remove();
         this._hostDlCheckUrl = '';
         this._hostDlCheckToken++;
+    },
+
+    removeHostPageButton() {
+        this.removePageActionBar();
     },
 
     /** Raw href attribute is scannable (not # / javascript: / empty). */
