@@ -4,13 +4,14 @@ A Tampermonkey userscript that turns any webpage into a Real-Debrid workstation 
 
 ## Features
 
-- **Page scanner** — Inline icons on supported host links and magnets across any site
+- **Page action bar** — Top-right **Download via RD** + expand (⤢) when host, magnet, or `.torrent` links are detected; validity status dot (green / yellow / red)
+- **Page scanner** — Inline icons on supported host links and magnets; optional host-file / iframe deep scan; toggles in Settings
 - **Smart magnets** — Instant cache check; auto, video-only, all-files, or manual selection
 - **Links tab** — Paste, drag-and-drop, batch unrestrict, history, and export (plain / curl / wget)
 - **Torrents tab** — Add magnet/upload `.torrent`, file picker, live progress, Play/M3U, bulk delete
 - **Cloud tab** — Paginated history, Load More, rename, search, sort, bulk delete
 - **Media player** — In-browser playback with RD transcode fallback; PiP; VLC, IINA, Infuse
-- **Page cache badges** — Cached/Uncached status for host links and magnets
+- **Updates** — Settings → Updates checks GitHub for a newer release and opens a one-click install URL
 - **Mobile** — Bottom sheet UI, swipe dismiss, pull-to-refresh, long-press menus
 - **Liquid Glass UI** — Dark glassmorphism that stays readable on any page
 
@@ -22,9 +23,11 @@ A Tampermonkey userscript that turns any webpage into a Real-Debrid workstation 
 ## Install
 
 1. Install Tampermonkey in your browser.
-2. Open the raw userscript: [`dist/real-debrid-suite.user.js`](dist/real-debrid-suite.user.js)
+2. Open the raw userscript: [`dist/real-debrid-suite.user.js`](https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js)
 3. Tampermonkey will prompt to install — confirm.
 4. Visit any webpage. On first run, enter your Real-Debrid API token.
+
+Already installed? Open **Settings → Updates → Check for Updates**, or let Tampermonkey pick up `@updateURL` / `@downloadURL`.
 
 ### API Token
 
@@ -36,11 +39,12 @@ A Tampermonkey userscript that turns any webpage into a Real-Debrid workstation 
 
 | Action | How |
 |--------|-----|
-| Open dashboard | Click the ⚡ FAB (bottom-right) or press `Alt+R` |
+| Open dashboard | Click **⤢** on the top-right action bar, the bottom-right ⚡ FAB (when the bar is hidden), or press `Alt+R` |
+| Download from page | Click **Download via RD** on the top-right bar (when a supported host link is present) |
 | Close dashboard | Click ✕ or press `Escape` |
-| Unrestrict a link | Paste in Links tab, or click inline ⚡ on any page |
+| Unrestrict a link | Paste in Links tab, click inline ⚡, or use the page download button |
 | Batch download | Page tab → select links → DL Selected |
-| Settings | Settings tab — toggles, magnet behavior, player choice |
+| Settings | Settings tab — Page scanner, magnet behavior, player, updates |
 
 See [docs/TESTING.md](docs/TESTING.md) for a full manual test checklist and [docs/DESIGN.md](docs/DESIGN.md) for the design system.
 
@@ -59,16 +63,14 @@ npm install
 npm run split    # split monolith into src/modules/ (after editing RealDebrid v37.js)
 npm run build    # bundle src/ → dist/real-debrid-suite.user.js
 npm run lint     # ESLint
-npm test         # Vitest (settings migration, utils)
+npm test         # Vitest
 ```
 
 Source modules live in `src/`. The bundled output in `dist/` is what users install.
 
 ### CI / GitHub Actions
 
-GitHub Actions are **intentionally disabled** on this repo (settings off, no workflow files).
-Lint + test + build all run locally via the commands above before each commit. If you want CI
-back on, add `.github/workflows/ci.yml` running `npm ci && npm run lint && npm test && npm run build`.
+Pull requests run [`.github/workflows/ci.yml`](.github/workflows/ci.yml): `npm ci`, lint, test, and build. Run the same commands locally before pushing.
 
 ## Changelog
 
