@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.8] - 2026-08-22
+
+### Changed
+- **Page action bar (top-right)** — download button moved from bottom-left to top-right, grouped with a new **expand** control (⤢) that opens the full RD Suite widget (Page tab when links are detected). Replaces the bottom-right FAB when the bar is visible.
+
 ## [41.7] - 2026-08-22
 
 ### Added
