@@ -15,7 +15,8 @@ export default [
                 GM_addStyle: 'readonly',
                 GM_notification: 'readonly',
                 GM_setValue: 'readonly',
-                GM_getValue: 'readonly'
+                GM_getValue: 'readonly',
+                GM_openInTab: 'readonly'
             }
         },
         rules: {

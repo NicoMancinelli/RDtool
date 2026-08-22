@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.5
+// @version      41.6
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -19,7 +19,9 @@
 // @grant        GM.getValue
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_openInTab
 // @connect      real-debrid.com
+// @connect      github.com
 // @sandbox      raw
 // @run-at       document-end
 // ==/UserScript==
@@ -884,8 +886,10 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.5",
+  VERSION: "41.6",
   SETTINGS_VERSION: 2,
+  UPDATE_URL:
+    "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
   TAB_KEYS: Object.freeze({
@@ -1130,7 +1134,14 @@ const Config = {
         activeTorrentCount: null,
         apiHostRegex: null,
         apiHostRegexFolder: null,
-        trafficDetails: null
+        trafficDetails: null,
+        updateInfo: {
+            checking: false,
+            latest: null,
+            checkedAt: null,
+            updateAvailable: false,
+            error: null
+        }
     };
 
     // =========================================================================
@@ -1161,6 +1172,15 @@ const Config = {
     try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
     const savedHostsAt = parseInt(GM_getValue('rd_hosts_updated_at', '0'), 10);
     if (savedHostsAt > 0) State.hostsUpdatedAt = savedHostsAt;
+
+    // Cached update check (startup toast + Settings badge)
+    const cachedLatest = GM_getValue('rd_latest_version', '');
+    if (cachedLatest) {
+        State.updateInfo.latest = cachedLatest;
+        State.updateInfo.updateAvailable = compareVersions(cachedLatest, Config.VERSION) > 0;
+    }
+    const lastUpdateCheck = parseInt(GM_getValue('rd_last_update_check', '0'), 10);
+    if (lastUpdateCheck > 0) State.updateInfo.checkedAt = lastUpdateCheck;
 
     // Now build the host regex
     Config.hostRegex = Config.getActiveRegex();
@@ -1266,6 +1286,106 @@ const Config = {
         if (State.settings.extPlayer === 'infuse') return 'infuse://x-callback-url/play?url=' + encodeURIComponent(url);
         return url;
     }
+
+    /** Parse // @version from userscript source text. */
+    function parseUserscriptVersion(text) {
+        if (!text || typeof text !== 'string') return null;
+        const m = text.match(/^\/\/\s*@version\s+(\S+)/m);
+        return m ? m[1] : null;
+    }
+
+    /** Compare dotted version strings; returns 1 if a>b, -1 if a<b, 0 if equal. */
+    function compareVersions(a, b) {
+        const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+        const len = Math.max(pa.length, pb.length);
+        for (let i = 0; i < len; i++) {
+            const da = pa[i] || 0;
+            const db = pb[i] || 0;
+            if (da > db) return 1;
+            if (da < db) return -1;
+        }
+        return 0;
+    }
+
+    const Updates = {
+        _fetchScript() {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: Config.UPDATE_URL + '?t=' + Date.now(),
+                    onload: (resp) => {
+                        if (resp.status >= 400) {
+                            return resolve({ ok: false, error: 'HTTP ' + resp.status });
+                        }
+                        const version = parseUserscriptVersion(resp.responseText);
+                        if (!version) return resolve({ ok: false, error: 'Could not parse version' });
+                        resolve({ ok: true, version });
+                    },
+                    onerror: () => resolve({ ok: false, error: 'Network error' }),
+                    ontimeout: () => resolve({ ok: false, error: 'Request timed out' })
+                });
+            });
+        },
+
+        async check() {
+            State.updateInfo.checking = true;
+            State.updateInfo.error = null;
+            this._refreshSettingsUI();
+            const res = await this._fetchScript();
+            State.updateInfo.checking = false;
+            State.updateInfo.checkedAt = Date.now();
+            GM_setValue('rd_last_update_check', String(State.updateInfo.checkedAt));
+            if (!res.ok) {
+                State.updateInfo.error = res.error;
+                this._refreshSettingsUI();
+                return res;
+            }
+            State.updateInfo.latest = res.version;
+            GM_setValue('rd_latest_version', res.version);
+            State.updateInfo.updateAvailable = compareVersions(res.version, Config.VERSION) > 0;
+            this._refreshSettingsUI();
+            this._refreshHeaderBadge();
+            return res;
+        },
+
+        applyUpdate() {
+            const url = Config.UPDATE_URL;
+            if (typeof GM_openInTab === 'function') {
+                GM_openInTab(url, { active: true, insert: true });
+            } else {
+                window.open(url, '_blank', 'noopener');
+            }
+            UI.showToast('Confirm the install prompt in your userscript manager');
+        },
+
+        maybeCheckOnStartup() {
+            const last = parseInt(GM_getValue('rd_last_update_check', '0'), 10);
+            if (Date.now() - last < 86400000) return;
+            this.check().then((res) => {
+                if (res.ok && State.updateInfo.updateAvailable) {
+                    UI.showToast('RD Suite v' + res.version + ' is available — open Settings to update');
+                }
+            }).catch(() => {});
+        },
+
+        _refreshSettingsUI() {
+            if (Tabs.Settings && Tabs.Settings._refreshUpdatesSection) {
+                Tabs.Settings._refreshUpdatesSection();
+            }
+        },
+
+        _refreshHeaderBadge() {
+            const badge = document.getElementById('rd-version-badge');
+            if (!badge) return;
+            const up = State.updateInfo.updateAvailable;
+            badge.textContent = 'v' + Config.VERSION + (up ? ' ↑' : '');
+            badge.style.color = up ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
+            badge.title = up && State.updateInfo.latest
+                ? 'v' + State.updateInfo.latest + ' available — open Settings to update'
+                : '';
+        }
+    };
 
     // =========================================================================
 
@@ -2045,8 +2165,14 @@ const Config = {
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v' + Config.VERSION,
-                        style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
+                        id: 'rd-version-badge',
+                        textContent: 'v' + Config.VERSION + (State.updateInfo.updateAvailable ? ' ↑' : ''),
+                        title: State.updateInfo.updateAvailable && State.updateInfo.latest
+                            ? 'v' + State.updateInfo.latest + ' available — open Settings to update'
+                            : '',
+                        style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:' +
+                            (State.updateInfo.updateAvailable ? 'var(--rd-warning)' : 'var(--rd-text-secondary)') +
+                            ';border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
                         textContent: State.sessionStats.processed + ' processed',
@@ -4198,6 +4324,10 @@ const Config = {
             wrapper.append(this._buildTextRow('Smart Filter Extensions', 'filterExts', State.settings.filterExts));
             wrapper.append(this._buildTextRow('Custom Hosts (comma separated)', 'customHosts', State.settings.customHosts, () => { Config.hostRegex = Config.getActiveRegex(); }));
 
+            // Updates
+            wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin:16px 0 8px; color:var(--rd-accent);', textContent: 'Updates' }));
+            wrapper.append(this._buildUpdatesSection());
+
             // Import/Export
             wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin:16px 0 8px; color:var(--rd-accent);', textContent: 'Backup' }));
             const backupRow = DOM.create('div', { style: 'display:flex; gap:8px;' });
@@ -4248,6 +4378,80 @@ const Config = {
             if (!el) return;
             el.textContent = this._getHostsIndicatorText();
             el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
+        },
+
+        _getUpdatesStatusText() {
+            const info = State.updateInfo;
+            if (info.checking) return 'Checking for updates…';
+            if (info.error) return 'Check failed: ' + info.error;
+            if (info.latest) {
+                if (info.updateAvailable) return 'v' + info.latest + ' is available (you have v' + Config.VERSION + ')';
+                return 'You are on the latest version (v' + Config.VERSION + ')';
+            }
+            return 'Installed: v' + Config.VERSION;
+        },
+
+        _buildUpdatesSection() {
+            const section = DOM.create('div', {
+                id: 'rd-updates-section',
+                style: 'background:var(--rd-bg-glass); border-radius:var(--rd-radius-md); padding:12px; margin-bottom:16px; border:1px solid var(--rd-glass-border);'
+            });
+            section.append(DOM.create('div', {
+                id: 'rd-updates-status',
+                style: 'font-size:12px; color:var(--rd-text-secondary); margin-bottom:10px; line-height:1.4;',
+                textContent: this._getUpdatesStatusText()
+            }));
+            if (State.updateInfo.checkedAt && !State.updateInfo.checking) {
+                section.append(DOM.create('div', {
+                    id: 'rd-updates-checked-at',
+                    style: 'font-size:10px; color:var(--rd-text-secondary); margin:-6px 0 10px; opacity:0.8;',
+                    textContent: 'Last checked ' + formatRelativeTime(State.updateInfo.checkedAt)
+                }));
+            }
+            const btnRow = DOM.create('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' });
+            btnRow.append(DOM.create('button', {
+                id: 'rd-check-updates-btn',
+                className: 'rd-input-btn',
+                textContent: State.updateInfo.checking ? 'Checking…' : 'Check for Updates',
+                style: 'flex:1; min-width:120px;',
+                disabled: State.updateInfo.checking,
+                onClick: async () => {
+                    const res = await Updates.check();
+                    if (res.ok) {
+                        if (State.updateInfo.updateAvailable) {
+                            UI.showToast('Update available: v' + res.version);
+                        } else {
+                            UI.showToast('You are up to date');
+                        }
+                    } else {
+                        UI.showToast(res.error || 'Update check failed', 'error');
+                    }
+                }
+            }));
+            if (State.updateInfo.updateAvailable) {
+                btnRow.append(DOM.create('button', {
+                    id: 'rd-install-update-btn',
+                    className: 'rd-action-btn',
+                    textContent: 'Install Update',
+                    style: 'flex:1; min-width:120px; background:var(--rd-accent); color:var(--rd-bg-base); font-weight:bold;',
+                    onClick: () => Updates.applyUpdate()
+                }));
+            }
+            section.append(btnRow);
+            section.append(DOM.create('div', {
+                style: 'font-size:10px; color:var(--rd-text-secondary); margin-top:10px; line-height:1.4;',
+                textContent: 'Install Update opens the script in a new tab — confirm the prompt in Tampermonkey (or your userscript manager) to replace the installed copy.'
+            }));
+            return section;
+        },
+
+        _refreshUpdatesSection() {
+            const section = document.getElementById('rd-updates-section');
+            if (!section || State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
+            const parent = section.parentElement;
+            if (!parent) return;
+            const next = this._buildUpdatesSection();
+            section.replaceWith(next);
         },
 
         _buildToggleRow({ key, label, desc, onChange }) {
@@ -5312,6 +5516,8 @@ const Init = {
         showInitErrorBanner(err);
         return;
       }
+
+      Updates.maybeCheckOnStartup();
 
       if (!State.apiKey) return;
 

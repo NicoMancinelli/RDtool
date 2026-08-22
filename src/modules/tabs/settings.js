@@ -194,6 +194,10 @@
             wrapper.append(this._buildTextRow('Smart Filter Extensions', 'filterExts', State.settings.filterExts));
             wrapper.append(this._buildTextRow('Custom Hosts (comma separated)', 'customHosts', State.settings.customHosts, () => { Config.hostRegex = Config.getActiveRegex(); }));
 
+            // Updates
+            wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin:16px 0 8px; color:var(--rd-accent);', textContent: 'Updates' }));
+            wrapper.append(this._buildUpdatesSection());
+
             // Import/Export
             wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin:16px 0 8px; color:var(--rd-accent);', textContent: 'Backup' }));
             const backupRow = DOM.create('div', { style: 'display:flex; gap:8px;' });
@@ -244,6 +248,80 @@
             if (!el) return;
             el.textContent = this._getHostsIndicatorText();
             el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
+        },
+
+        _getUpdatesStatusText() {
+            const info = State.updateInfo;
+            if (info.checking) return 'Checking for updates…';
+            if (info.error) return 'Check failed: ' + info.error;
+            if (info.latest) {
+                if (info.updateAvailable) return 'v' + info.latest + ' is available (you have v' + Config.VERSION + ')';
+                return 'You are on the latest version (v' + Config.VERSION + ')';
+            }
+            return 'Installed: v' + Config.VERSION;
+        },
+
+        _buildUpdatesSection() {
+            const section = DOM.create('div', {
+                id: 'rd-updates-section',
+                style: 'background:var(--rd-bg-glass); border-radius:var(--rd-radius-md); padding:12px; margin-bottom:16px; border:1px solid var(--rd-glass-border);'
+            });
+            section.append(DOM.create('div', {
+                id: 'rd-updates-status',
+                style: 'font-size:12px; color:var(--rd-text-secondary); margin-bottom:10px; line-height:1.4;',
+                textContent: this._getUpdatesStatusText()
+            }));
+            if (State.updateInfo.checkedAt && !State.updateInfo.checking) {
+                section.append(DOM.create('div', {
+                    id: 'rd-updates-checked-at',
+                    style: 'font-size:10px; color:var(--rd-text-secondary); margin:-6px 0 10px; opacity:0.8;',
+                    textContent: 'Last checked ' + formatRelativeTime(State.updateInfo.checkedAt)
+                }));
+            }
+            const btnRow = DOM.create('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' });
+            btnRow.append(DOM.create('button', {
+                id: 'rd-check-updates-btn',
+                className: 'rd-input-btn',
+                textContent: State.updateInfo.checking ? 'Checking…' : 'Check for Updates',
+                style: 'flex:1; min-width:120px;',
+                disabled: State.updateInfo.checking,
+                onClick: async () => {
+                    const res = await Updates.check();
+                    if (res.ok) {
+                        if (State.updateInfo.updateAvailable) {
+                            UI.showToast('Update available: v' + res.version);
+                        } else {
+                            UI.showToast('You are up to date');
+                        }
+                    } else {
+                        UI.showToast(res.error || 'Update check failed', 'error');
+                    }
+                }
+            }));
+            if (State.updateInfo.updateAvailable) {
+                btnRow.append(DOM.create('button', {
+                    id: 'rd-install-update-btn',
+                    className: 'rd-action-btn',
+                    textContent: 'Install Update',
+                    style: 'flex:1; min-width:120px; background:var(--rd-accent); color:var(--rd-bg-base); font-weight:bold;',
+                    onClick: () => Updates.applyUpdate()
+                }));
+            }
+            section.append(btnRow);
+            section.append(DOM.create('div', {
+                style: 'font-size:10px; color:var(--rd-text-secondary); margin-top:10px; line-height:1.4;',
+                textContent: 'Install Update opens the script in a new tab — confirm the prompt in Tampermonkey (or your userscript manager) to replace the installed copy.'
+            }));
+            return section;
+        },
+
+        _refreshUpdatesSection() {
+            const section = document.getElementById('rd-updates-section');
+            if (!section || State.currentTab !== Config.TAB_KEYS.SETTINGS) return;
+            const parent = section.parentElement;
+            if (!parent) return;
+            const next = this._buildUpdatesSection();
+            section.replaceWith(next);
         },
 
         _buildToggleRow({ key, label, desc, onChange }) {

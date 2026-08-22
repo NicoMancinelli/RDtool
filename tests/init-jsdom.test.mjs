@@ -25,6 +25,9 @@ function loadInit(win, { uiInit, scannerInit, apiKey = 'test-key' } = {}) {
     win.Scanner = {
         init: scannerInit || (() => {})
     };
+    win.Updates = {
+        maybeCheckOnStartup: () => {}
+    };
 
     const patched = initSrc
         .replace(/^function loadOfflineData/m, 'var loadOfflineData = function loadOfflineData')

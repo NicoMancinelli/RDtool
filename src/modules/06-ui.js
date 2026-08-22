@@ -357,8 +357,14 @@
                     DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
-                        textContent: 'v' + Config.VERSION,
-                        style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:var(--rd-text-secondary);border:1px solid var(--rd-glass-border);'
+                        id: 'rd-version-badge',
+                        textContent: 'v' + Config.VERSION + (State.updateInfo.updateAvailable ? ' ↑' : ''),
+                        title: State.updateInfo.updateAvailable && State.updateInfo.latest
+                            ? 'v' + State.updateInfo.latest + ' available — open Settings to update'
+                            : '',
+                        style: 'background:var(--rd-bg-glass);padding:2px 8px;border-radius:10px;font-size:9px;color:' +
+                            (State.updateInfo.updateAvailable ? 'var(--rd-warning)' : 'var(--rd-text-secondary)') +
+                            ';border:1px solid var(--rd-glass-border);'
                     }),
                     DOM.create('span', {
                         textContent: State.sessionStats.processed + ' processed',

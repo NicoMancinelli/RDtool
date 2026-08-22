@@ -82,6 +82,8 @@ const Init = {
         return;
       }
 
+      Updates.maybeCheckOnStartup();
+
       if (!State.apiKey) return;
 
       try {
