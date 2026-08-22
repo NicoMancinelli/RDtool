@@ -119,6 +119,24 @@
             // --- Preferences ---
             wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin-bottom:8px; color:var(--rd-success);', textContent: 'Preferences' }));
 
+            wrapper.append(DOM.create('div', { style: 'font-size:12px; font-weight:bold; margin:8px 0 4px; color:var(--rd-text-secondary); text-transform:uppercase; letter-spacing:0.04em;', textContent: 'Page scanner' }));
+
+            const pageScannerToggles = [
+                { key: 'hostPageDownloadButton', label: 'Host File Download Button', desc: 'Show Download via RD on host file pages (e.g. Rapidgator /file/…)', onChange: () => Scanner._updateHostPageButton() },
+                { key: 'inlinePageIcons', label: 'Inline Page Icons', desc: 'Show ⚡ / magnet icons beside detected links on web pages', onChange: () => {
+                    if (!State.settings.inlinePageIcons) {
+                        document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
+                    } else {
+                        Scanner.scanPage();
+                    }
+                } },
+                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
+                { key: 'useApiHostRegex', label: 'Use API Host Regex', desc: 'Use Real-Debrid /hosts/regex for link detection (fallback to built-in list)', onChange: () => { Config.hostRegex = Config.getActiveRegex(); Scanner.scanPage(); Scanner._updateHostPageButton(); } }
+            ];
+            for (const setting of pageScannerToggles) {
+                wrapper.append(this._buildToggleRow(setting));
+            }
+
             // Toggle settings
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
@@ -131,10 +149,8 @@
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
                 { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
-                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
                 { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' },
-                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' },
-                { key: 'useApiHostRegex', label: 'Use API Host Regex', desc: 'Use Real-Debrid /hosts/regex for link detection (fallback to built-in list)' }
+                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -230,7 +246,7 @@
             el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
         },
 
-        _buildToggleRow({ key, label, desc }) {
+        _buildToggleRow({ key, label, desc, onChange }) {
             const row = DOM.create('div', { className: 'rd-account-row', style: 'display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--rd-glass-border); font-size:12px;' });
             const labelEl = DOM.create('span');
             labelEl.append(DOM.text(label));
@@ -239,7 +255,12 @@
             const toggle = DOM.create('label', { className: 'rd-toggle' });
             const input = DOM.create('input', { type: 'checkbox' });
             input.checked = !!State.settings[key];
-            input.addEventListener('change', () => { State.settings[key] = input.checked; saveSettings(); UI.showToast('Settings Saved'); });
+            input.addEventListener('change', () => {
+                State.settings[key] = input.checked;
+                saveSettings();
+                UI.showToast('Settings Saved');
+                if (onChange) onChange();
+            });
             const slider = DOM.create('span', { className: 'rd-slider' });
             toggle.append(input, slider);
 

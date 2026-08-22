@@ -151,13 +151,15 @@ const Scanner = {
 
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
-                const icon = this.injectIcon(link, '\u{1F9F2}', () => {
-                    if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
-                    addMagnet(url);
-                }, url);
-                this.checkMagnetCache(url, icon);
-                if (State.settings.hijack) {
-                    link.addEventListener('click', (e) => { e.preventDefault(); addMagnet(url); });
+                if (State.settings.inlinePageIcons !== false) {
+                    const icon = this.injectIcon(link, '\u{1F9F2}', () => {
+                        if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
+                        addMagnet(url);
+                    }, url);
+                    this.checkMagnetCache(url, icon);
+                    if (State.settings.hijack) {
+                        link.addEventListener('click', (e) => { e.preventDefault(); addMagnet(url); });
+                    }
                 }
                 if (!State.scannedLinksMap.has(url)) {
                     State.scannedLinksMap.set(url, { type: 'magnet', text: text.substring(0, 45) });
@@ -172,26 +174,28 @@ const Scanner = {
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 
-                if (isDown) {
-                    this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
-                } else {
-                    const icon = this.injectIcon(link, '\u26A1', () => {
-                        UI.openTab('links', () => unrestrictLinkOrFolder(url));
-                    }, url);
-                    // X-ray tooltip on hover
-                    this._setupXray(icon, url);
-                    // Hijack
-                    if (State.settings.hijack) {
-                        link.addEventListener('click', (e) => {
-                            if (!e.ctrlKey && !e.metaKey) {
-                                e.preventDefault();
-                                UI.openTab('links', () => unrestrictLinkOrFolder(url));
-                            }
-                        });
+                if (State.settings.inlinePageIcons !== false) {
+                    if (isDown) {
+                        this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
+                    } else {
+                        const icon = this.injectIcon(link, '\u26A1', () => {
+                            UI.openTab('links', () => unrestrictLinkOrFolder(url));
+                        }, url);
+                        // X-ray tooltip on hover
+                        this._setupXray(icon, url);
+                        // Hijack
+                        if (State.settings.hijack) {
+                            link.addEventListener('click', (e) => {
+                                if (!e.ctrlKey && !e.metaKey) {
+                                    e.preventDefault();
+                                    UI.openTab('links', () => unrestrictLinkOrFolder(url));
+                                }
+                            });
+                        }
                     }
-                    if (!State.scannedLinksMap.has(url)) {
-                        State.scannedLinksMap.set(url, { type: 'host', text: text.substring(0, 45) });
-                    }
+                }
+                if (!State.scannedLinksMap.has(url)) {
+                    State.scannedLinksMap.set(url, { type: 'host', text: text.substring(0, 45) });
                 }
                 newFound = true;
             }
@@ -224,7 +228,7 @@ const Scanner = {
 
     /** One fixed download control on host file pages (e.g. Rapidgator /file/…). */
     _updateHostPageButton() {
-        if (!State.apiKey) {
+        if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
             this.removeHostPageButton();
             return;
         }

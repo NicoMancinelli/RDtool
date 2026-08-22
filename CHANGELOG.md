@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.5] - 2026-08-22
+
+### Added
+- **Settings → Page scanner** — toggles for **Host File Download Button** (Download via RD on `/file/…` pages) and **Inline Page Icons** (⚡ beside detected links). Both default on; changes apply immediately without reload.
+
 ## [41.4] - 2026-08-22
 
 ### Added
