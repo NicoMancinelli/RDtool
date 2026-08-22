@@ -97,4 +97,104 @@
         return url;
     }
 
+    /** Parse // @version from userscript source text. */
+    function parseUserscriptVersion(text) {
+        if (!text || typeof text !== 'string') return null;
+        const m = text.match(/^\/\/\s*@version\s+(\S+)/m);
+        return m ? m[1] : null;
+    }
+
+    /** Compare dotted version strings; returns 1 if a>b, -1 if a<b, 0 if equal. */
+    function compareVersions(a, b) {
+        const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+        const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+        const len = Math.max(pa.length, pb.length);
+        for (let i = 0; i < len; i++) {
+            const da = pa[i] || 0;
+            const db = pb[i] || 0;
+            if (da > db) return 1;
+            if (da < db) return -1;
+        }
+        return 0;
+    }
+
+    const Updates = {
+        _fetchScript() {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: Config.UPDATE_URL + '?t=' + Date.now(),
+                    onload: (resp) => {
+                        if (resp.status >= 400) {
+                            return resolve({ ok: false, error: 'HTTP ' + resp.status });
+                        }
+                        const version = parseUserscriptVersion(resp.responseText);
+                        if (!version) return resolve({ ok: false, error: 'Could not parse version' });
+                        resolve({ ok: true, version });
+                    },
+                    onerror: () => resolve({ ok: false, error: 'Network error' }),
+                    ontimeout: () => resolve({ ok: false, error: 'Request timed out' })
+                });
+            });
+        },
+
+        async check() {
+            State.updateInfo.checking = true;
+            State.updateInfo.error = null;
+            this._refreshSettingsUI();
+            const res = await this._fetchScript();
+            State.updateInfo.checking = false;
+            State.updateInfo.checkedAt = Date.now();
+            GM_setValue('rd_last_update_check', String(State.updateInfo.checkedAt));
+            if (!res.ok) {
+                State.updateInfo.error = res.error;
+                this._refreshSettingsUI();
+                return res;
+            }
+            State.updateInfo.latest = res.version;
+            GM_setValue('rd_latest_version', res.version);
+            State.updateInfo.updateAvailable = compareVersions(res.version, Config.VERSION) > 0;
+            this._refreshSettingsUI();
+            this._refreshHeaderBadge();
+            return res;
+        },
+
+        applyUpdate() {
+            const url = Config.UPDATE_URL;
+            if (typeof GM_openInTab === 'function') {
+                GM_openInTab(url, { active: true, insert: true });
+            } else {
+                window.open(url, '_blank', 'noopener');
+            }
+            UI.showToast('Confirm the install prompt in your userscript manager');
+        },
+
+        maybeCheckOnStartup() {
+            const last = parseInt(GM_getValue('rd_last_update_check', '0'), 10);
+            if (Date.now() - last < 86400000) return;
+            this.check().then((res) => {
+                if (res.ok && State.updateInfo.updateAvailable) {
+                    UI.showToast('RD Suite v' + res.version + ' is available — open Settings to update');
+                }
+            }).catch(() => {});
+        },
+
+        _refreshSettingsUI() {
+            if (Tabs.Settings && Tabs.Settings._refreshUpdatesSection) {
+                Tabs.Settings._refreshUpdatesSection();
+            }
+        },
+
+        _refreshHeaderBadge() {
+            const badge = document.getElementById('rd-version-badge');
+            if (!badge) return;
+            const up = State.updateInfo.updateAvailable;
+            badge.textContent = 'v' + Config.VERSION + (up ? ' ↑' : '');
+            badge.style.color = up ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
+            badge.title = up && State.updateInfo.latest
+                ? 'v' + State.updateInfo.latest + ' available — open Settings to update'
+                : '';
+        }
+    };
+
     // =========================================================================

@@ -2,8 +2,10 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.5",
+  VERSION: "41.6",
   SETTINGS_VERSION: 2,
+  UPDATE_URL:
+    "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
   TAB_KEYS: Object.freeze({

@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.6] - 2026-08-22
+
+### Added
+- **Settings → Updates** — check for a newer release against the GitHub install URL, see installed vs latest version, and **Install Update** opens the script in a new tab for one-click reinstall in Tampermonkey.
+- **Automatic update check** — once per day on startup; toast when a newer version is available.
+
 ## [41.5] - 2026-08-22
 
 ### Added

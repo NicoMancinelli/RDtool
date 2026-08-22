@@ -45,7 +45,14 @@
         activeTorrentCount: null,
         apiHostRegex: null,
         apiHostRegexFolder: null,
-        trafficDetails: null
+        trafficDetails: null,
+        updateInfo: {
+            checking: false,
+            latest: null,
+            checkedAt: null,
+            updateAvailable: false,
+            error: null
+        }
     };
 
     // =========================================================================
@@ -76,6 +83,15 @@
     try { State.dynamicHosts = JSON.parse(GM_getValue('rd_dynamic_hosts', '[]')); } catch(e) { State.dynamicHosts = []; }
     const savedHostsAt = parseInt(GM_getValue('rd_hosts_updated_at', '0'), 10);
     if (savedHostsAt > 0) State.hostsUpdatedAt = savedHostsAt;
+
+    // Cached update check (startup toast + Settings badge)
+    const cachedLatest = GM_getValue('rd_latest_version', '');
+    if (cachedLatest) {
+        State.updateInfo.latest = cachedLatest;
+        State.updateInfo.updateAvailable = compareVersions(cachedLatest, Config.VERSION) > 0;
+    }
+    const lastUpdateCheck = parseInt(GM_getValue('rd_last_update_check', '0'), 10);
+    if (lastUpdateCheck > 0) State.updateInfo.checkedAt = lastUpdateCheck;
 
     // Now build the host regex
     Config.hostRegex = Config.getActiveRegex();
