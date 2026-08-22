@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.6
+// @version      41.7
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -22,6 +22,7 @@
 // @grant        GM_openInTab
 // @connect      real-debrid.com
 // @connect      github.com
+// @connect      *
 // @sandbox      raw
 // @run-at       document-end
 // ==/UserScript==
@@ -886,7 +887,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.6",
+  VERSION: "41.7",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -2008,14 +2009,8 @@ const Config = {
 
             container.appendChild(fab);
 
-            // Auto-show logic
             const count = State.scannedLinksMap.size;
-            if (count === 0 && State.settings.autoShow) {
-                container.classList.add('rd-hidden');
-            } else {
-                container.classList.remove('rd-hidden');
-            }
-
+            UI.updateFabVisibility();
             UI.updateBadge(count);
             if (State.queueProcessing) UI.updateQueueProgress(State.queueCompleted, State.queueTotal);
         },
@@ -2420,6 +2415,15 @@ const Config = {
             return { overlay, modal, close };
         },
 
+        updateFabVisibility() {
+            const container = document.getElementById('rd-ui-container');
+            if (!container || !State.apiKey || State.isExpanded) return;
+            const show = typeof Scanner !== 'undefined'
+                && Scanner.hasPageActionableContent
+                && Scanner.hasPageActionableContent();
+            container.classList.toggle('rd-hidden', !show);
+        },
+
         updateBadge(count) {
             // FAB badge
             const fabBadge = document.getElementById('rd-fab-badge');
@@ -2434,11 +2438,7 @@ const Config = {
                 tabBadge.textContent = count > 0 ? ' (' + count + ')' : '';
             }
 
-            // Auto-show FAB
-            const container = document.getElementById('rd-ui-container');
-            if (!State.isExpanded && container && State.settings.autoShow && count > 0) {
-                container.classList.remove('rd-hidden');
-            }
+            UI.updateFabVisibility();
         },
 
         setQueueActive(active) {
@@ -3073,6 +3073,45 @@ const Config = {
         await TorrentPicker.open(res.data.id, callback);
     }
 
+    async function addTorrentFromUrl(url, callback) {
+        if (!url || !/\.torrent(\?|#|$)/i.test(url.split('#')[0])) {
+            UI.showToast('Not a torrent URL', 'error');
+            return;
+        }
+        UI.showToast('Fetching torrent…');
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'arraybuffer',
+                onload: async (resp) => {
+                    if (resp.status >= 400) {
+                        UI.showToast('Could not fetch torrent (HTTP ' + resp.status + ')', 'error');
+                        resolve(false);
+                        return;
+                    }
+                    let name = 'download.torrent';
+                    try {
+                        const path = new URL(url).pathname;
+                        const base = path.split('/').pop();
+                        if (base) name = base.includes('.') ? base : base + '.torrent';
+                    } catch (_) { /* keep default */ }
+                    const file = new File([resp.response], name, { type: 'application/x-bittorrent' });
+                    await uploadTorrentFile(file, callback);
+                    resolve(true);
+                },
+                onerror: () => {
+                    UI.showToast('Could not fetch torrent', 'error');
+                    resolve(false);
+                },
+                ontimeout: () => {
+                    UI.showToast('Torrent fetch timed out', 'error');
+                    resolve(false);
+                }
+            });
+        });
+    }
+
 
 // ===================== Tabs (Links + Page) =====================
 
@@ -3495,7 +3534,7 @@ const Config = {
             const groups = new Map();
             for (const [url, data] of State.scannedLinksMap.entries()) {
                 let domain;
-                try { domain = data.type === 'magnet' ? 'Magnets' : new URL(url).hostname.replace('www.', ''); } catch(e) { domain = 'Other'; }
+                try { domain = data.type === 'magnet' ? 'Magnets' : data.type === 'torrent' ? 'Torrent files' : new URL(url).hostname.replace('www.', ''); } catch(e) { domain = 'Other'; }
                 if (!groups.has(domain)) groups.set(domain, []);
                 groups.get(domain).push({ url, ...data });
             }
@@ -3526,7 +3565,7 @@ const Config = {
 
                 // Links in group
                 for (const link of links) {
-                    const icon = link.type === 'magnet' ? '\u{1F9F2}' : '\u{1F517}'; // magnet or link emoji
+                    const icon = link.type === 'magnet' ? '\u{1F9F2}' : link.type === 'torrent' ? '\u{1F4E5}' : '\u{1F517}';
                     const chk = DOM.create('input', { type: 'checkbox', className: 'rd-page-chk rd-checkbox', value: link.url });
                     chk.checked = true;
 
@@ -3540,6 +3579,9 @@ const Config = {
                             this.textContent = '...';
                             if (link.url.startsWith('magnet:')) {
                                 await addMagnet(link.url);
+                                this.textContent = '\u2705';
+                            } else if (link.type === 'torrent') {
+                                await addTorrentFromUrl(link.url);
                                 this.textContent = '\u2705';
                             } else {
                                 await unrestrictLinkOrFolder(link.url, true, null, (finalUrl) => {
@@ -3556,6 +3598,7 @@ const Config = {
                         onClick: () => {
                             UI.openTab(Config.TAB_KEYS.LINKS, () => {
                                 if (link.url.startsWith('magnet:')) addMagnet(link.url);
+                                else if (link.type === 'torrent') addTorrentFromUrl(link.url);
                                 else unrestrictLinkOrFolder(link.url);
                             });
                         }
@@ -4252,7 +4295,7 @@ const Config = {
             wrapper.append(DOM.create('div', { style: 'font-size:12px; font-weight:bold; margin:8px 0 4px; color:var(--rd-text-secondary); text-transform:uppercase; letter-spacing:0.04em;', textContent: 'Page scanner' }));
 
             const pageScannerToggles = [
-                { key: 'hostPageDownloadButton', label: 'Host File Download Button', desc: 'Show Download via RD on host file pages (e.g. Rapidgator /file/…)', onChange: () => Scanner._updateHostPageButton() },
+                { key: 'hostPageDownloadButton', label: 'Page Download Button', desc: 'Show Download via RD when a supported host link is on the page (or you are on a host file URL)', onChange: () => Scanner._updateHostPageButton() },
                 { key: 'inlinePageIcons', label: 'Inline Page Icons', desc: 'Show ⚡ / magnet icons beside detected links on web pages', onChange: () => {
                     if (!State.settings.inlinePageIcons) {
                         document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
@@ -4270,7 +4313,7 @@ const Config = {
             // Toggle settings
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
-                { key: 'autoShow', label: 'Auto-Show Dashboard' },
+                { key: 'autoShow', label: 'Auto-Show Dashboard', desc: 'Legacy setting — the corner widget now appears only when supported, magnet, or torrent links are detected on the page' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
                 { key: 'rememberDashboardOpen', label: 'Remember Dashboard Open', desc: 'Restore dashboard open/closed state across page loads' },
                 { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
@@ -4633,6 +4676,7 @@ const Scanner = {
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
             Scanner.removeHostPageButton();
             UI.updateBadge(0);
+            UI.updateFabVisibility();
             this.scanPage();
             this._updateHostPageButton();
         };
@@ -4713,6 +4757,25 @@ const Scanner = {
                     State.scannedLinksMap.set(url, { type: 'magnet', text: text.substring(0, 45) });
                 }
                 newFound = true;
+            } else if (/\.torrent(\?|#|$)/i.test(url.split('#')[0])) {
+                link.classList.add('rd-processed');
+                if (State.settings.inlinePageIcons !== false) {
+                    const icon = this.injectIcon(link, '\u{1F4E5}', () => {
+                        addTorrentFromUrl(url);
+                    }, url);
+                    if (State.settings.hijack) {
+                        link.addEventListener('click', (e) => {
+                            if (!e.ctrlKey && !e.metaKey) {
+                                e.preventDefault();
+                                addTorrentFromUrl(url);
+                            }
+                        });
+                    }
+                }
+                if (!State.scannedLinksMap.has(url)) {
+                    State.scannedLinksMap.set(url, { type: 'torrent', text: text.substring(0, 45) });
+                }
+                newFound = true;
             } else if (Config.hostRegex && Config.hostRegex.test(url) && !link.querySelector('img')) {
                 link.classList.add('rd-processed');
                 // Check host status
@@ -4750,6 +4813,8 @@ const Scanner = {
         }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
+            this._updateHostPageButton();
+            UI.updateFabVisibility();
             if (State.currentTab === 'page' && State.isExpanded) {
                 clearTimeout(this._pageRefreshTimer);
                 this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
@@ -4774,15 +4839,42 @@ const Scanner = {
         return Config.hostRegex.test(clean);
     },
 
-    /** One fixed download control on host file pages (e.g. Rapidgator /file/…). */
+    /** True when the page has something RD can act on (host / magnet / torrent). */
+    hasPageActionableContent() {
+        if (this.isHostFilePageUrl(this.getPageUrl())) return true;
+        return State.scannedLinksMap.size > 0;
+    },
+
+    /** True when a host-file download button should be offered. */
+    hasHostDownloadTarget() {
+        if (this.isHostFilePageUrl(this.getPageUrl())) return true;
+        for (const [, data] of State.scannedLinksMap) {
+            if (data.type === 'host') return true;
+        }
+        return false;
+    },
+
+    /** URL for the fixed page download button (current file page or first host link). */
+    getPrimaryHostDownloadUrl() {
+        const pageUrl = this.getPageUrl();
+        if (this.isHostFilePageUrl(pageUrl)) return pageUrl;
+        for (const [url, data] of State.scannedLinksMap) {
+            if (data.type === 'host') return url;
+        }
+        return null;
+    },
+
+    /** One fixed download control when a supported host link is on the page. */
     _updateHostPageButton() {
         if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
             this.removeHostPageButton();
+            UI.updateFabVisibility();
             return;
         }
-        const url = this.getPageUrl();
-        if (!this.isHostFilePageUrl(url)) {
+        const url = this.getPrimaryHostDownloadUrl();
+        if (!url) {
             this.removeHostPageButton();
+            UI.updateFabVisibility();
             return;
         }
 
@@ -4816,12 +4908,13 @@ const Scanner = {
         btn.disabled = !!isDown || btn.classList.contains('rd-busy');
         btn.title = isDown
             ? ((hostObj && hostObj.name) || hostDomain) + ' is offline'
-            : 'Unrestrict this file with Real-Debrid';
+            : 'Unrestrict with Real-Debrid';
+        UI.updateFabVisibility();
     },
 
     async _onHostPageDownloadClick() {
         const btn = document.getElementById('rd-host-dl-btn');
-        const url = this.getPageUrl();
+        const url = this.getPrimaryHostDownloadUrl();
         if (!url || (btn && (btn.disabled || btn.classList.contains('rd-busy')))) return;
 
         const label = btn && btn.querySelector('.rd-host-dl-label');

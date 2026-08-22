@@ -122,7 +122,7 @@
             wrapper.append(DOM.create('div', { style: 'font-size:12px; font-weight:bold; margin:8px 0 4px; color:var(--rd-text-secondary); text-transform:uppercase; letter-spacing:0.04em;', textContent: 'Page scanner' }));
 
             const pageScannerToggles = [
-                { key: 'hostPageDownloadButton', label: 'Host File Download Button', desc: 'Show Download via RD on host file pages (e.g. Rapidgator /file/…)', onChange: () => Scanner._updateHostPageButton() },
+                { key: 'hostPageDownloadButton', label: 'Page Download Button', desc: 'Show Download via RD when a supported host link is on the page (or you are on a host file URL)', onChange: () => Scanner._updateHostPageButton() },
                 { key: 'inlinePageIcons', label: 'Inline Page Icons', desc: 'Show ⚡ / magnet icons beside detected links on web pages', onChange: () => {
                     if (!State.settings.inlinePageIcons) {
                         document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
@@ -140,7 +140,7 @@
             // Toggle settings
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
-                { key: 'autoShow', label: 'Auto-Show Dashboard' },
+                { key: 'autoShow', label: 'Auto-Show Dashboard', desc: 'Legacy setting — the corner widget now appears only when supported, magnet, or torrent links are detected on the page' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
                 { key: 'rememberDashboardOpen', label: 'Remember Dashboard Open', desc: 'Restore dashboard open/closed state across page loads' },
                 { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },

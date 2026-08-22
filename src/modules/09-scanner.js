@@ -85,6 +85,7 @@ const Scanner = {
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
             Scanner.removeHostPageButton();
             UI.updateBadge(0);
+            UI.updateFabVisibility();
             this.scanPage();
             this._updateHostPageButton();
         };
@@ -165,6 +166,25 @@ const Scanner = {
                     State.scannedLinksMap.set(url, { type: 'magnet', text: text.substring(0, 45) });
                 }
                 newFound = true;
+            } else if (/\.torrent(\?|#|$)/i.test(url.split('#')[0])) {
+                link.classList.add('rd-processed');
+                if (State.settings.inlinePageIcons !== false) {
+                    const icon = this.injectIcon(link, '\u{1F4E5}', () => {
+                        addTorrentFromUrl(url);
+                    }, url);
+                    if (State.settings.hijack) {
+                        link.addEventListener('click', (e) => {
+                            if (!e.ctrlKey && !e.metaKey) {
+                                e.preventDefault();
+                                addTorrentFromUrl(url);
+                            }
+                        });
+                    }
+                }
+                if (!State.scannedLinksMap.has(url)) {
+                    State.scannedLinksMap.set(url, { type: 'torrent', text: text.substring(0, 45) });
+                }
+                newFound = true;
             } else if (Config.hostRegex && Config.hostRegex.test(url) && !link.querySelector('img')) {
                 link.classList.add('rd-processed');
                 // Check host status
@@ -202,6 +222,8 @@ const Scanner = {
         }
         if (newFound) {
             UI.updateBadge(State.scannedLinksMap.size);
+            this._updateHostPageButton();
+            UI.updateFabVisibility();
             if (State.currentTab === 'page' && State.isExpanded) {
                 clearTimeout(this._pageRefreshTimer);
                 this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
@@ -226,15 +248,42 @@ const Scanner = {
         return Config.hostRegex.test(clean);
     },
 
-    /** One fixed download control on host file pages (e.g. Rapidgator /file/…). */
+    /** True when the page has something RD can act on (host / magnet / torrent). */
+    hasPageActionableContent() {
+        if (this.isHostFilePageUrl(this.getPageUrl())) return true;
+        return State.scannedLinksMap.size > 0;
+    },
+
+    /** True when a host-file download button should be offered. */
+    hasHostDownloadTarget() {
+        if (this.isHostFilePageUrl(this.getPageUrl())) return true;
+        for (const [, data] of State.scannedLinksMap) {
+            if (data.type === 'host') return true;
+        }
+        return false;
+    },
+
+    /** URL for the fixed page download button (current file page or first host link). */
+    getPrimaryHostDownloadUrl() {
+        const pageUrl = this.getPageUrl();
+        if (this.isHostFilePageUrl(pageUrl)) return pageUrl;
+        for (const [url, data] of State.scannedLinksMap) {
+            if (data.type === 'host') return url;
+        }
+        return null;
+    },
+
+    /** One fixed download control when a supported host link is on the page. */
     _updateHostPageButton() {
         if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
             this.removeHostPageButton();
+            UI.updateFabVisibility();
             return;
         }
-        const url = this.getPageUrl();
-        if (!this.isHostFilePageUrl(url)) {
+        const url = this.getPrimaryHostDownloadUrl();
+        if (!url) {
             this.removeHostPageButton();
+            UI.updateFabVisibility();
             return;
         }
 
@@ -268,12 +317,13 @@ const Scanner = {
         btn.disabled = !!isDown || btn.classList.contains('rd-busy');
         btn.title = isDown
             ? ((hostObj && hostObj.name) || hostDomain) + ' is offline'
-            : 'Unrestrict this file with Real-Debrid';
+            : 'Unrestrict with Real-Debrid';
+        UI.updateFabVisibility();
     },
 
     async _onHostPageDownloadClick() {
         const btn = document.getElementById('rd-host-dl-btn');
-        const url = this.getPageUrl();
+        const url = this.getPrimaryHostDownloadUrl();
         if (!url || (btn && (btn.disabled || btn.classList.contains('rd-busy')))) return;
 
         const label = btn && btn.querySelector('.rd-host-dl-label');

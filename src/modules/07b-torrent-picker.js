@@ -139,3 +139,42 @@
         UI.showToast('Torrent uploaded — pick files');
         await TorrentPicker.open(res.data.id, callback);
     }
+
+    async function addTorrentFromUrl(url, callback) {
+        if (!url || !/\.torrent(\?|#|$)/i.test(url.split('#')[0])) {
+            UI.showToast('Not a torrent URL', 'error');
+            return;
+        }
+        UI.showToast('Fetching torrent…');
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'arraybuffer',
+                onload: async (resp) => {
+                    if (resp.status >= 400) {
+                        UI.showToast('Could not fetch torrent (HTTP ' + resp.status + ')', 'error');
+                        resolve(false);
+                        return;
+                    }
+                    let name = 'download.torrent';
+                    try {
+                        const path = new URL(url).pathname;
+                        const base = path.split('/').pop();
+                        if (base) name = base.includes('.') ? base : base + '.torrent';
+                    } catch (_) { /* keep default */ }
+                    const file = new File([resp.response], name, { type: 'application/x-bittorrent' });
+                    await uploadTorrentFile(file, callback);
+                    resolve(true);
+                },
+                onerror: () => {
+                    UI.showToast('Could not fetch torrent', 'error');
+                    resolve(false);
+                },
+                ontimeout: () => {
+                    UI.showToast('Torrent fetch timed out', 'error');
+                    resolve(false);
+                }
+            });
+        });
+    }

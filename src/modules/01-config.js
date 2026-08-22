@@ -2,7 +2,7 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.6",
+  VERSION: "41.7",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",

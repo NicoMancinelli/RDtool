@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.7] - 2026-08-22
+
+### Added
+- **Page download button** — fixed **Download via RD** control appears when the scanner finds a supported host link on any page (not only when the open tab is itself a file URL).
+- **Smart corner widget** — the FAB stays hidden until the page has a supported host link, magnet link, `.torrent` URL, or you are on a host file page. Opens into the full dashboard on click.
+- **`.torrent` link detection** — HTTP(S) links ending in `.torrent` are scanned, counted for the widget badge, and can be fetched + uploaded from the Page tab.
+
+### Changed
+- FAB visibility is now always content-based (independent of whether the dashboard was manually opened before).
+
 ## [41.6] - 2026-08-22
 
 ### Added
