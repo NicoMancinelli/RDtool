@@ -51,6 +51,32 @@ function loadIsHostFilePageUrl(Config) {
     return fn();
 }
 
+function loadPageContentHelpers(Config) {
+    globalThis.Config = Config;
+    const patterns = [
+        'getPageUrl\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'isHostFilePageUrl\\(url\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'hasPageActionableContent\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'hasHostDownloadTarget\\(\\) \\{[\\s\\S]*?\\n {4}\\},',
+        'getPrimaryHostDownloadUrl\\(\\) \\{[\\s\\S]*?\\n {4}\\},'
+    ];
+    const methods = patterns.map((p) => {
+        const m = scannerSrc.match(new RegExp(p));
+        if (!m) throw new Error('Scanner method not found: ' + p);
+        return m[0];
+    }).join('\n    ');
+    const fn = new Function(`
+        const State = globalThis.State;
+        const Scanner = { ${methods} };
+        return Scanner;
+    `);
+    return fn();
+}
+
+function isTorrentFileUrl(url) {
+    return /\.torrent(\?|#|$)/i.test(String(url).split('#')[0]);
+}
+
 describe('Scanner.isHostFilePageUrl — host file tab detection', () => {
     let Config;
     let isHostFilePageUrl;
@@ -142,5 +168,82 @@ describe('Config.getActiveRegex — no bare dynamicHosts for BASE domains', () =
         const re = Config.getActiveRegex();
         expect(re.test('https://www.rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x')).toBe(true);
         expect(re.test('https://rapidgator.net/wallet/topup')).toBe(false);
+    });
+});
+
+describe('Scanner page content helpers', () => {
+    let Config;
+    let Scanner;
+
+    beforeEach(() => {
+        Config = loadConfig();
+        globalThis.State = {
+            settings: { useApiHostRegex: false },
+            dynamicHosts: [],
+            scannedLinksMap: new Map()
+        };
+        Config.hostRegex = Config.getActiveRegex();
+        Scanner = loadPageContentHelpers(Config);
+    });
+
+    it('hasPageActionableContent is true for host file tab or scanned links', () => {
+        expect(Scanner.hasPageActionableContent()).toBe(false);
+        globalThis.State.scannedLinksMap.set('magnet:?xt=urn:btih:abc', { type: 'magnet' });
+        expect(Scanner.hasPageActionableContent()).toBe(true);
+    });
+
+    it('getPrimaryHostDownloadUrl prefers current file page, else first host link', () => {
+        globalThis.location = { href: 'https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html' };
+        expect(Scanner.getPrimaryHostDownloadUrl()).toBe('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html');
+
+        globalThis.location = { href: 'https://forum.example/thread' };
+        globalThis.State.scannedLinksMap.set('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html', { type: 'host' });
+        expect(Scanner.getPrimaryHostDownloadUrl()).toBe('https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x.epub.html');
+        expect(Scanner.hasHostDownloadTarget()).toBe(true);
+    });
+});
+
+describe('torrent URL detection', () => {
+    it('matches .torrent links with optional query or hash', () => {
+        expect(isTorrentFileUrl('https://example.com/files/movie.torrent')).toBe(true);
+        expect(isTorrentFileUrl('https://example.com/files/movie.torrent?token=1')).toBe(true);
+        expect(isTorrentFileUrl('https://example.com/files/movie.torrent#x')).toBe(true);
+        expect(isTorrentFileUrl('https://example.com/files/movie.mkv')).toBe(false);
+    });
+});
+
+function loadMapUnrestrictCheck() {
+    const match = scannerSrc.match(/_mapUnrestrictCheck\(ok, data\) \{[\s\S]*?\n {4}\},/);
+    if (!match) throw new Error('_mapUnrestrictCheck not found');
+    const fn = new Function(`
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+        const Scanner = { ${match[0]} };
+        return Scanner._mapUnrestrictCheck.bind(Scanner);
+    `);
+    return fn();
+}
+
+describe('Scanner._mapUnrestrictCheck', () => {
+    const map = loadMapUnrestrictCheck();
+
+    it('marks supported files as valid with filename and size', () => {
+        const res = map(true, { supported: true, filename: 'movie.mkv', filesize: 1073741824 });
+        expect(res.status).toBe('valid');
+        expect(res.detail).toContain('movie.mkv');
+        expect(res.detail).toContain('GB');
+    });
+
+    it('marks unsupported links as invalid', () => {
+        expect(map(true, { supported: false }).status).toBe('invalid');
+    });
+
+    it('marks API failures as error', () => {
+        expect(map(false, null).status).toBe('error');
     });
 });

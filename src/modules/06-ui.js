@@ -200,14 +200,8 @@
 
             container.appendChild(fab);
 
-            // Auto-show logic
             const count = State.scannedLinksMap.size;
-            if (count === 0 && State.settings.autoShow) {
-                container.classList.add('rd-hidden');
-            } else {
-                container.classList.remove('rd-hidden');
-            }
-
+            UI.updateFabVisibility();
             UI.updateBadge(count);
             if (State.queueProcessing) UI.updateQueueProgress(State.queueCompleted, State.queueTotal);
         },
@@ -612,6 +606,15 @@
             return { overlay, modal, close };
         },
 
+        updateFabVisibility() {
+            const container = document.getElementById('rd-ui-container');
+            if (!container || !State.apiKey || State.isExpanded) return;
+            const show = typeof Scanner !== 'undefined'
+                && Scanner.hasPageActionableContent
+                && Scanner.hasPageActionableContent();
+            container.classList.toggle('rd-hidden', !show);
+        },
+
         updateBadge(count) {
             // FAB badge
             const fabBadge = document.getElementById('rd-fab-badge');
@@ -626,11 +629,7 @@
                 tabBadge.textContent = count > 0 ? ' (' + count + ')' : '';
             }
 
-            // Auto-show FAB
-            const container = document.getElementById('rd-ui-container');
-            if (!State.isExpanded && container && State.settings.autoShow && count > 0) {
-                container.classList.remove('rd-hidden');
-            }
+            UI.updateFabVisibility();
         },
 
         setQueueActive(active) {

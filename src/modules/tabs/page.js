@@ -92,7 +92,7 @@
             const groups = new Map();
             for (const [url, data] of State.scannedLinksMap.entries()) {
                 let domain;
-                try { domain = data.type === 'magnet' ? 'Magnets' : new URL(url).hostname.replace('www.', ''); } catch(e) { domain = 'Other'; }
+                try { domain = data.type === 'magnet' ? 'Magnets' : data.type === 'torrent' ? 'Torrent files' : new URL(url).hostname.replace('www.', ''); } catch(e) { domain = 'Other'; }
                 if (!groups.has(domain)) groups.set(domain, []);
                 groups.get(domain).push({ url, ...data });
             }
@@ -123,7 +123,7 @@
 
                 // Links in group
                 for (const link of links) {
-                    const icon = link.type === 'magnet' ? '\u{1F9F2}' : '\u{1F517}'; // magnet or link emoji
+                    const icon = link.type === 'magnet' ? '\u{1F9F2}' : link.type === 'torrent' ? '\u{1F4E5}' : '\u{1F517}';
                     const chk = DOM.create('input', { type: 'checkbox', className: 'rd-page-chk rd-checkbox', value: link.url });
                     chk.checked = true;
 
@@ -137,6 +137,9 @@
                             this.textContent = '...';
                             if (link.url.startsWith('magnet:')) {
                                 await addMagnet(link.url);
+                                this.textContent = '\u2705';
+                            } else if (link.type === 'torrent') {
+                                await addTorrentFromUrl(link.url);
                                 this.textContent = '\u2705';
                             } else {
                                 await unrestrictLinkOrFolder(link.url, true, null, (finalUrl) => {
@@ -153,6 +156,7 @@
                         onClick: () => {
                             UI.openTab(Config.TAB_KEYS.LINKS, () => {
                                 if (link.url.startsWith('magnet:')) addMagnet(link.url);
+                                else if (link.type === 'torrent') addTorrentFromUrl(link.url);
                                 else unrestrictLinkOrFolder(link.url);
                             });
                         }
