@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.4
+// @version      41.5
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -884,7 +884,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.4",
+  VERSION: "41.5",
   SETTINGS_VERSION: 2,
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
@@ -943,6 +943,8 @@ const Config = {
     apiRateLimit: "4",
     maxLinksPerScan: "150",
     useApiHostRegex: true,
+    hostPageDownloadButton: true,
+    inlinePageIcons: true,
   },
 
   isMobile:
@@ -4121,6 +4123,24 @@ const Config = {
             // --- Preferences ---
             wrapper.append(DOM.create('div', { style: 'font-size:14px; font-weight:bold; margin-bottom:8px; color:var(--rd-success);', textContent: 'Preferences' }));
 
+            wrapper.append(DOM.create('div', { style: 'font-size:12px; font-weight:bold; margin:8px 0 4px; color:var(--rd-text-secondary); text-transform:uppercase; letter-spacing:0.04em;', textContent: 'Page scanner' }));
+
+            const pageScannerToggles = [
+                { key: 'hostPageDownloadButton', label: 'Host File Download Button', desc: 'Show Download via RD on host file pages (e.g. Rapidgator /file/…)', onChange: () => Scanner._updateHostPageButton() },
+                { key: 'inlinePageIcons', label: 'Inline Page Icons', desc: 'Show ⚡ / magnet icons beside detected links on web pages', onChange: () => {
+                    if (!State.settings.inlinePageIcons) {
+                        document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
+                    } else {
+                        Scanner.scanPage();
+                    }
+                } },
+                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
+                { key: 'useApiHostRegex', label: 'Use API Host Regex', desc: 'Use Real-Debrid /hosts/regex for link detection (fallback to built-in list)', onChange: () => { Config.hostRegex = Config.getActiveRegex(); Scanner.scanPage(); Scanner._updateHostPageButton(); } }
+            ];
+            for (const setting of pageScannerToggles) {
+                wrapper.append(this._buildToggleRow(setting));
+            }
+
             // Toggle settings
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
@@ -4133,10 +4153,8 @@ const Config = {
                 { key: 'smartFilter', label: 'Smart Extension Filter' },
                 { key: 'notificationSound', label: 'Notification Sound' },
                 { key: 'notifyOnQueueComplete', label: 'Notify on Queue Complete' },
-                { key: 'deepScan', label: 'Deep Scan (iframes)', desc: 'Scan links inside iframes — slower' },
                 { key: 'dedupeHistory', label: 'Dedupe Link History', desc: 'Replace older entries when the same download URL is added again' },
-                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' },
-                { key: 'useApiHostRegex', label: 'Use API Host Regex', desc: 'Use Real-Debrid /hosts/regex for link detection (fallback to built-in list)' }
+                { key: 'useUnrestrictCache', label: 'Cache Unrestrict Results', desc: 'Skip API calls for host links already unrestricted this session' }
             ];
             for (const setting of toggleSettings) {
                 wrapper.append(this._buildToggleRow(setting));
@@ -4232,7 +4250,7 @@ const Config = {
             el.style.color = State.hostsFetchFailed ? 'var(--rd-warning)' : 'var(--rd-text-secondary)';
         },
 
-        _buildToggleRow({ key, label, desc }) {
+        _buildToggleRow({ key, label, desc, onChange }) {
             const row = DOM.create('div', { className: 'rd-account-row', style: 'display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--rd-glass-border); font-size:12px;' });
             const labelEl = DOM.create('span');
             labelEl.append(DOM.text(label));
@@ -4241,7 +4259,12 @@ const Config = {
             const toggle = DOM.create('label', { className: 'rd-toggle' });
             const input = DOM.create('input', { type: 'checkbox' });
             input.checked = !!State.settings[key];
-            input.addEventListener('change', () => { State.settings[key] = input.checked; saveSettings(); UI.showToast('Settings Saved'); });
+            input.addEventListener('change', () => {
+                State.settings[key] = input.checked;
+                saveSettings();
+                UI.showToast('Settings Saved');
+                if (onChange) onChange();
+            });
             const slider = DOM.create('span', { className: 'rd-slider' });
             toggle.append(input, slider);
 
@@ -4472,13 +4495,15 @@ const Scanner = {
 
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
-                const icon = this.injectIcon(link, '\u{1F9F2}', () => {
-                    if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
-                    addMagnet(url);
-                }, url);
-                this.checkMagnetCache(url, icon);
-                if (State.settings.hijack) {
-                    link.addEventListener('click', (e) => { e.preventDefault(); addMagnet(url); });
+                if (State.settings.inlinePageIcons !== false) {
+                    const icon = this.injectIcon(link, '\u{1F9F2}', () => {
+                        if (State.settings.openDashboardOnMagnet) UI.toggleDashboard(true);
+                        addMagnet(url);
+                    }, url);
+                    this.checkMagnetCache(url, icon);
+                    if (State.settings.hijack) {
+                        link.addEventListener('click', (e) => { e.preventDefault(); addMagnet(url); });
+                    }
                 }
                 if (!State.scannedLinksMap.has(url)) {
                     State.scannedLinksMap.set(url, { type: 'magnet', text: text.substring(0, 45) });
@@ -4493,26 +4518,28 @@ const Scanner = {
                 const hostObj = Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()));
                 const isDown = hostObj && hostObj.status === 'down';
 
-                if (isDown) {
-                    this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
-                } else {
-                    const icon = this.injectIcon(link, '\u26A1', () => {
-                        UI.openTab('links', () => unrestrictLinkOrFolder(url));
-                    }, url);
-                    // X-ray tooltip on hover
-                    this._setupXray(icon, url);
-                    // Hijack
-                    if (State.settings.hijack) {
-                        link.addEventListener('click', (e) => {
-                            if (!e.ctrlKey && !e.metaKey) {
-                                e.preventDefault();
-                                UI.openTab('links', () => unrestrictLinkOrFolder(url));
-                            }
-                        });
+                if (State.settings.inlinePageIcons !== false) {
+                    if (isDown) {
+                        this.injectIcon(link, '\u274C', () => UI.showToast((hostObj.name || hostDomain) + ' is offline', 'error'), url, 'error');
+                    } else {
+                        const icon = this.injectIcon(link, '\u26A1', () => {
+                            UI.openTab('links', () => unrestrictLinkOrFolder(url));
+                        }, url);
+                        // X-ray tooltip on hover
+                        this._setupXray(icon, url);
+                        // Hijack
+                        if (State.settings.hijack) {
+                            link.addEventListener('click', (e) => {
+                                if (!e.ctrlKey && !e.metaKey) {
+                                    e.preventDefault();
+                                    UI.openTab('links', () => unrestrictLinkOrFolder(url));
+                                }
+                            });
+                        }
                     }
-                    if (!State.scannedLinksMap.has(url)) {
-                        State.scannedLinksMap.set(url, { type: 'host', text: text.substring(0, 45) });
-                    }
+                }
+                if (!State.scannedLinksMap.has(url)) {
+                    State.scannedLinksMap.set(url, { type: 'host', text: text.substring(0, 45) });
                 }
                 newFound = true;
             }
@@ -4545,7 +4572,7 @@ const Scanner = {
 
     /** One fixed download control on host file pages (e.g. Rapidgator /file/…). */
     _updateHostPageButton() {
-        if (!State.apiKey) {
+        if (!State.apiKey || State.settings.hostPageDownloadButton === false) {
             this.removeHostPageButton();
             return;
         }

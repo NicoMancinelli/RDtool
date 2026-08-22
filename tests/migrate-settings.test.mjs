@@ -36,3 +36,30 @@ describe('migrateSettings', () => {
         expect(result.hijack).toBe(false);
     });
 });
+
+describe('page scanner settings defaults (41.5)', () => {
+    const fullDefaults = {
+        hostPageDownloadButton: true,
+        inlinePageIcons: true,
+    };
+
+    function migrateWithDefaults(raw, defaultSettings) {
+        const settings = {};
+        for (const key of Object.keys(defaultSettings)) {
+            settings[key] = raw && Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : defaultSettings[key];
+        }
+        return settings;
+    }
+
+    it('defaults host page download button and inline icons to on', () => {
+        const result = migrateWithDefaults({}, fullDefaults);
+        expect(result.hostPageDownloadButton).toBe(true);
+        expect(result.inlinePageIcons).toBe(true);
+    });
+
+    it('preserves explicit off values', () => {
+        const result = migrateWithDefaults({ hostPageDownloadButton: false, inlinePageIcons: false }, fullDefaults);
+        expect(result.hostPageDownloadButton).toBe(false);
+        expect(result.inlinePageIcons).toBe(false);
+    });
+});

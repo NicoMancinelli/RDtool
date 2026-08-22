@@ -2,7 +2,7 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.4",
+  VERSION: "41.5",
   SETTINGS_VERSION: 2,
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
@@ -61,6 +61,8 @@ const Config = {
     apiRateLimit: "4",
     maxLinksPerScan: "150",
     useApiHostRegex: true,
+    hostPageDownloadButton: true,
+    inlinePageIcons: true,
   },
 
   isMobile:
