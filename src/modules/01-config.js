@@ -2,7 +2,7 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.2",
+  VERSION: "41.3",
   SETTINGS_VERSION: 2,
 
   // Tab identifiers — single source of truth to avoid typo bugs in Tabs.* lookups.
@@ -89,6 +89,7 @@ const Config = {
 
   getActiveRegex() {
     if (State.settings.useApiHostRegex && State.apiHostRegex) {
+      if (State.apiHostRegex instanceof RegExp) return State.apiHostRegex;
       try {
         return new RegExp(State.apiHostRegex, "i");
       } catch (e) {
@@ -97,10 +98,18 @@ const Config = {
     }
 
     const allHosts = [...this.BASE_HOSTS];
+    const baseSource = this.BASE_HOSTS.join("\n");
 
     if (State.dynamicHosts && State.dynamicHosts.length) {
       State.dynamicHosts.forEach((h) => {
-        allHosts.push(h.replace(/\./g, "\\."));
+        if (!h || typeof h !== "string") return;
+        const escaped = h.replace(/\./g, "\\.");
+        // BASE_HOSTS already has a path-aware pattern for this domain (e.g.
+        // rapidgator.net/file/…). OR-ing the bare domain would match every
+        // nav/login/article link on the host and spam ⚡ icons.
+        if (baseSource.includes(escaped)) return;
+        // Unknown host: require a non-trivial path so bare homepage URLs are skipped.
+        allHosts.push(escaped + "\\/[^\\s\"'<>#?]{2,}");
       });
     }
 
@@ -110,11 +119,49 @@ const Config = {
         .map((h) => h.trim())
         .filter(Boolean)
         .forEach((h) => {
-          allHosts.push(h.replace(/\./g, "\\."));
+          const escaped = h.replace(/\./g, "\\.");
+          // Custom entries may be full path patterns or bare domains.
+          if (h.includes("/")) {
+            allHosts.push(escaped);
+          } else {
+            allHosts.push(escaped + "\\/[^\\s\"'<>#?]{2,}");
+          }
         });
     }
 
     return new RegExp("\\b(" + allHosts.join("|") + ")", "i");
+  },
+
+  /**
+   * Real-Debrid /hosts/regex returns an array of `/pattern/` strings (not
+   * `{ regex: "..." }`). Compile them into one RegExp, or null on failure.
+   */
+  compileApiHostRegex(data) {
+    let list = [];
+    if (Array.isArray(data)) {
+      list = data;
+    } else if (data && typeof data === "object" && data.regex) {
+      list = Array.isArray(data.regex) ? data.regex : [data.regex];
+    } else if (typeof data === "string") {
+      list = [data];
+    }
+    const bodies = list
+      .map((p) => {
+        if (typeof p !== "string") return null;
+        let s = p.trim();
+        if (s.startsWith("/")) {
+          const last = s.lastIndexOf("/");
+          if (last > 0) s = s.slice(1, last);
+        }
+        return s || null;
+      })
+      .filter(Boolean);
+    if (!bodies.length) return null;
+    try {
+      return new RegExp("(?:" + bodies.join("|") + ")", "i");
+    } catch (e) {
+      return null;
+    }
   },
 
   hostRegex: null,

@@ -39,13 +39,21 @@ const Scanner = {
                 if (ok && data) State.liveHosts = data;
             }),
             useApiRegex ? API.getHostsRegex().then(({ ok, data }) => {
-                if (ok && data && data.regex) {
-                    State.apiHostRegex = data.regex;
-                    Config.hostRegex = Config.getActiveRegex();
+                if (ok && data) {
+                    const compiled = Config.compileApiHostRegex(data);
+                    if (compiled) {
+                        State.apiHostRegex = compiled;
+                        Config.hostRegex = Config.getActiveRegex();
+                    }
                 }
             }) : Promise.resolve(),
             useApiRegex ? API.getHostsRegexFolder().then(({ ok, data }) => {
-                if (ok && data && data.regex) State.apiHostRegexFolder = data.regex;
+                if (ok && data) {
+                    // Folder regex is informational / future use; accept array or {regex}.
+                    const compiled = Config.compileApiHostRegex(data);
+                    if (compiled) State.apiHostRegexFolder = compiled;
+                    else if (data && data.regex) State.apiHostRegexFolder = data.regex;
+                }
             }) : Promise.resolve()
         ]).catch(() => { /* individual failures already handled above */ });
 
@@ -113,13 +121,28 @@ const Scanner = {
         const maxPerPass = Math.max(20, parseInt(State.settings.maxLinksPerScan, 10) || 150);
         this._linksScannedThisPass = 0;
         const links = doc.querySelectorAll('a:not(.rd-processed)');
+        let pageUrlNoHash = '';
+        try {
+            pageUrlNoHash = ((doc.defaultView || window).location.href || '').split('#')[0];
+        } catch (_) { /* opaque origin */ }
         for (let i = 0; i < links.length; i++) {
             if (this._linksScannedThisPass >= maxPerPass) break;
             const link = links[i];
             this._linksScannedThisPass++;
+
+            // Use the raw attribute — link.href resolves "#" to the current
+            // page URL, which on host file pages matches /file/… and paints ⚡
+            // on every Free/Premium/Download button.
+            const rawHref = link.getAttribute('href');
+            if (!Scanner.isScannableHref(rawHref)) continue;
+
             let url = link.href;
             let text = (link.innerText || '').trim() || url;
             if (!url) continue;
+            if (!/^(https?:|magnet:)/i.test(url)) continue;
+
+            // Same-document links (logo → current file, empty href, etc.)
+            if (pageUrlNoHash && url.split('#')[0] === pageUrlNoHash) continue;
 
             if (url.startsWith('magnet:')) {
                 link.classList.add('rd-processed');
@@ -175,6 +198,16 @@ const Scanner = {
                 this._pageRefreshTimer = setTimeout(() => Tabs.Page.refresh(), 400);
             }
         }
+    },
+
+    /** Raw href attribute is scannable (not # / javascript: / empty). */
+    isScannableHref(rawHref) {
+        if (rawHref == null) return false;
+        const href = String(rawHref).trim();
+        if (!href || href === '#') return false;
+        if (href.charAt(0) === '#') return false;
+        if (/^(javascript|mailto|tel|data|blob):/i.test(href)) return false;
+        return true;
     },
 
     injectIcon(target, text, handler, linkUrl, extraClass = '') {

@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.3] - 2026-08-22
+
+### Fixed
+- **Scanner icon spam on host file pages** — `href="#"` (Free/Premium/Download buttons on Rapidgator etc.) resolves to the current file URL via `link.href`, so the scanner painted ⚡ on every UI control. Raw href is checked first; hash-only, `javascript:`, and same-document links are skipped.
+- **Bare dynamic host domains** — `/hosts/domains` entries like `rapidgator.net` are no longer OR'd into the matcher when `BASE_HOSTS` already has a path-aware pattern, which was matching nav/login/article links.
+- **API `/hosts/regex` parsing** — Real-Debrid returns an array of `/pattern/` strings; the scanner expected `{ regex }` and never applied the precise API patterns (`useApiHostRegex` default).
+
 ## [41.2] - 2026-08-21
 
 ### Fixed
