@@ -19,6 +19,9 @@ function loadConfig() {
     if (typeof globalThis.localStorage === 'undefined') {
         globalThis.localStorage = { getItem: () => null, setItem: () => {} };
     }
+    if (typeof globalThis.navigator === 'undefined') {
+        globalThis.navigator = { userAgent: 'node', maxTouchPoints: 0 };
+    }
 
     const patched = configSrc
         .replace(/^const Config = /m, 'var Config = ');
