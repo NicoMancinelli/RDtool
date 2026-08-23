@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.8
+// @version      41.9
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -641,6 +641,29 @@ GM_addStyle(`:root {
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
             transition: box-shadow 0.2s ease, transform 0.2s ease;
         }
+        .rd-host-dl-cycle {
+            flex: 0 0 auto;
+            min-width: 36px;
+            height: 36px;
+            padding: 0 8px;
+            border-radius: var(--rd-radius-sm);
+            border: 1px solid var(--rd-glass-border);
+            background: linear-gradient(135deg, var(--rd-glass-tint), var(--rd-bg-glass)), var(--rd-bg-surface);
+            backdrop-filter: var(--rd-glass-blur);
+            -webkit-backdrop-filter: var(--rd-glass-blur);
+            color: var(--rd-text-secondary);
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm);
+        }
+        .rd-host-dl-cycle:hover {
+            color: var(--rd-text-primary);
+        }
+        .rd-host-dl-label-short {
+            display: none;
+        }
         .rd-page-expand-btn:hover {
             box-shadow: var(--rd-glass-highlight), var(--rd-shadow-sm), 0 0 16px rgba(110, 177, 255, 0.18);
             transform: translateY(-1px);
@@ -730,12 +753,19 @@ GM_addStyle(`:root {
             .rd-page-action-bar {
                 top: calc(12px + env(safe-area-inset-top, 0px));
                 right: calc(12px + env(safe-area-inset-right, 0px));
-                left: calc(12px + env(safe-area-inset-left, 0px));
-                max-width: none;
+                left: auto;
+                max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
             }
             .rd-host-dl-btn {
                 font-size: 11px;
                 padding: 8px 10px;
+                gap: 6px;
+            }
+            .rd-host-dl-label-full {
+                display: none;
+            }
+            .rd-host-dl-label-short {
+                display: inline;
             }
         }
 
@@ -986,7 +1016,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.8",
+  VERSION: "41.9",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -1022,7 +1052,6 @@ const Config = {
 
   defaultSettings: {
     hijack: false,
-    autoShow: true,
     magnetAction: "smart",
     filterExts: "nfo, txt, url, jpg, png, md, srt",
     smartFilter: false,
@@ -1049,6 +1078,7 @@ const Config = {
     useApiHostRegex: true,
     hostPageDownloadButton: true,
     inlinePageIcons: true,
+    blockInvalidDownloads: true,
   },
 
   isMobile:
@@ -4401,6 +4431,7 @@ const Config = {
 
             const pageScannerToggles = [
                 { key: 'hostPageDownloadButton', label: 'Page Download Button', desc: 'Show Download via RD when a supported host link is on the page (or you are on a host file URL)', onChange: () => Scanner._updateHostPageButton() },
+                { key: 'blockInvalidDownloads', label: 'Block Invalid Downloads', desc: 'Disable Download via RD when the link check fails or the host is offline', onChange: () => Scanner._updateHostPageButton() },
                 { key: 'inlinePageIcons', label: 'Inline Page Icons', desc: 'Show ⚡ / magnet icons beside detected links on web pages', onChange: () => {
                     if (!State.settings.inlinePageIcons) {
                         document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
@@ -4418,7 +4449,6 @@ const Config = {
             // Toggle settings
             const toggleSettings = [
                 { key: 'hijack', label: 'Hijack Native Links', desc: 'Clicking host links auto-routes to RD' },
-                { key: 'autoShow', label: 'Auto-Show Dashboard', desc: 'Legacy setting — the corner widget now appears only when supported, magnet, or torrent links are detected on the page' },
                 { key: 'rememberLastTab', label: 'Remember Last Tab' },
                 { key: 'rememberDashboardOpen', label: 'Remember Dashboard Open', desc: 'Restore dashboard open/closed state across page loads' },
                 { key: 'switchToTorrentsOnMagnet', label: 'Switch to Torrents on Magnet', desc: 'Open Torrents tab after a magnet is added successfully' },
@@ -4703,6 +4733,7 @@ const Scanner = {
     _HOST_RE: /^(?:https?|magnet):\/\/([^/]+)/i,
     _hostDlCheckToken: 0,
     _hostDlCheckUrl: '',
+    _selectedHostDlUrl: null,
 
     // Releases the MutationObserver. Currently a no-op at runtime (Tampermonkey
     // owns the page lifecycle), but exposed for future HMR / SPA-unmount paths.
@@ -4779,6 +4810,7 @@ const Scanner = {
             State.scannedLinksMap.clear();
             State.processedUrls.clear();
             State.pageCollapsedDomains.clear();
+            Scanner._selectedHostDlUrl = null;
             document.querySelectorAll('.rd-inline-icon').forEach(el => el.remove());
             document.querySelectorAll('.rd-processed').forEach(el => el.classList.remove('rd-processed'));
             Scanner.removePageActionBar();
@@ -4952,23 +4984,46 @@ const Scanner = {
         return State.scannedLinksMap.size > 0;
     },
 
-    /** True when a host-file download button should be offered. */
-    hasHostDownloadTarget() {
-        if (this.isHostFilePageUrl(this.getPageUrl())) return true;
-        for (const [, data] of State.scannedLinksMap) {
-            if (data.type === 'host') return true;
+    /** Ordered list of host download targets (current file page first, then scanned). */
+    getHostDownloadUrls() {
+        const urls = [];
+        const pageUrl = this.getPageUrl();
+        if (this.isHostFilePageUrl(pageUrl)) urls.push(pageUrl);
+        for (const [url, data] of State.scannedLinksMap) {
+            if (data.type === 'host' && !urls.includes(url)) urls.push(url);
         }
-        return false;
+        return urls;
     },
 
-    /** URL for the fixed page download button (current file page or first host link). */
+    /** True when a host-file download button should be offered. */
+    hasHostDownloadTarget() {
+        return this.getHostDownloadUrls().length > 0;
+    },
+
+    /** URL for the fixed page download button (selected, or first available). */
     getPrimaryHostDownloadUrl() {
-        const pageUrl = this.getPageUrl();
-        if (this.isHostFilePageUrl(pageUrl)) return pageUrl;
-        for (const [url, data] of State.scannedLinksMap) {
-            if (data.type === 'host') return url;
+        const urls = this.getHostDownloadUrls();
+        if (!urls.length) {
+            this._selectedHostDlUrl = null;
+            return null;
         }
-        return null;
+        if (this._selectedHostDlUrl && urls.includes(this._selectedHostDlUrl)) {
+            return this._selectedHostDlUrl;
+        }
+        this._selectedHostDlUrl = urls[0];
+        return urls[0];
+    },
+
+    cycleHostDownloadUrl(delta) {
+        const urls = this.getHostDownloadUrls();
+        if (urls.length < 2) return this.getPrimaryHostDownloadUrl();
+        const current = this.getPrimaryHostDownloadUrl();
+        let idx = Math.max(0, urls.indexOf(current));
+        idx = (idx + delta + urls.length) % urls.length;
+        this._selectedHostDlUrl = urls[idx];
+        this._hostDlCheckUrl = '';
+        this._updatePageActionBar();
+        return this._selectedHostDlUrl;
     },
 
     /** Top-right bar: download (when host link) + expand into full widget. */
@@ -4985,9 +5040,11 @@ const Scanner = {
             document.body.appendChild(bar);
         }
 
-        const showDownload = State.settings.hostPageDownloadButton !== false && this.hasHostDownloadTarget();
+        const hostUrls = this.getHostDownloadUrls();
+        const showDownload = State.settings.hostPageDownloadButton !== false && hostUrls.length > 0;
         const url = showDownload ? this.getPrimaryHostDownloadUrl() : null;
 
+        let cycleBtn = document.getElementById('rd-host-dl-cycle');
         let dlBtn = document.getElementById('rd-host-dl-btn');
         if (showDownload && url) {
             const hostMatch = url.match(Scanner._HOST_RE);
@@ -4996,6 +5053,29 @@ const Scanner = {
                 ? Object.values(State.liveHosts).find(h => hostDomain.includes(h.id) || hostDomain.includes((h.name || '').toLowerCase()))
                 : null;
             const isDown = hostObj && hostObj.status === 'down';
+            const multi = hostUrls.length > 1;
+            const idx = Math.max(0, hostUrls.indexOf(url));
+
+            if (multi) {
+                if (!cycleBtn) {
+                    cycleBtn = DOM.create('button', {
+                        id: 'rd-host-dl-cycle',
+                        className: 'rd-host-dl-cycle',
+                        type: 'button',
+                        title: 'Next host link',
+                        onClick: (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            Scanner.cycleHostDownloadUrl(1);
+                        }
+                    });
+                }
+                cycleBtn.textContent = (idx + 1) + '/' + hostUrls.length;
+                cycleBtn.title = 'Switch host link (' + (idx + 1) + ' of ' + hostUrls.length + ') — click for next';
+                bar.appendChild(cycleBtn);
+            } else if (cycleBtn) {
+                cycleBtn.remove();
+            }
 
             if (!dlBtn) {
                 dlBtn = DOM.create('button', {
@@ -5011,25 +5091,29 @@ const Scanner = {
                 }, [
                     DOM.create('span', { className: 'rd-host-dl-status', dataset: { status: 'checking' }, title: 'Checking link…' }),
                     DOM.create('span', { className: 'rd-host-dl-icon', textContent: '\u26A1' }),
-                    DOM.create('span', { className: 'rd-host-dl-label', textContent: 'Download via RD' })
+                    DOM.create('span', { className: 'rd-host-dl-label' }, [
+                        DOM.create('span', { className: 'rd-host-dl-label-full', textContent: 'Download via RD' }),
+                        DOM.create('span', { className: 'rd-host-dl-label-short', textContent: 'Download' })
+                    ])
                 ]);
             }
 
             dlBtn.dataset.linkUrl = url;
             dlBtn.classList.toggle('rd-offline', !!isDown);
-            dlBtn.disabled = !!isDown || dlBtn.classList.contains('rd-busy');
 
             if (isDown) {
                 this._setHostDownloadStatus(dlBtn, 'offline', ((hostObj && hostObj.name) || hostDomain) + ' is offline');
             } else {
-                dlBtn.title = 'Unrestrict with Real-Debrid';
                 this._refreshHostDownloadCheck(url);
             }
             bar.appendChild(dlBtn);
-        } else if (dlBtn) {
-            dlBtn.remove();
-            this._hostDlCheckUrl = '';
-            this._hostDlCheckToken++;
+        } else {
+            if (cycleBtn) cycleBtn.remove();
+            if (dlBtn) {
+                dlBtn.remove();
+                this._hostDlCheckUrl = '';
+                this._hostDlCheckToken++;
+            }
         }
 
         let expandBtn = document.getElementById('rd-page-expand-btn');
@@ -5098,6 +5182,13 @@ const Scanner = {
         };
         btn.title = tips[status] || 'Download via Real-Debrid';
         dot.title = btn.title;
+
+        const blockBad = State.settings.blockInvalidDownloads !== false
+            && (status === 'invalid' || status === 'offline' || status === 'error');
+        if (!btn.classList.contains('rd-busy')) {
+            btn.disabled = blockBad || status === 'offline';
+            btn.classList.toggle('rd-offline', status === 'offline' || status === 'invalid' || status === 'error');
+        }
     },
 
     async _refreshHostDownloadCheck(url) {
@@ -5107,12 +5198,16 @@ const Scanner = {
 
         if (this._hostDlCheckUrl === url) {
             const cur = btn.querySelector('.rd-host-dl-status');
-            if (cur && cur.dataset.status && cur.dataset.status !== 'checking') return;
+            if (cur && cur.dataset.status && cur.dataset.status !== 'checking') {
+                this._setHostDownloadStatus(btn, cur.dataset.status, btn.title);
+                return;
+            }
         }
         this._hostDlCheckUrl = url;
         const token = ++this._hostDlCheckToken;
 
         this._setHostDownloadStatus(btn, 'checking');
+        btn.disabled = true;
 
         const cachedStatus = State.pageLinkCache.get(url);
         if (cachedStatus === 'cached' && State.linkCheckCache.has(url)) {
@@ -5144,11 +5239,13 @@ const Scanner = {
         const url = this.getPrimaryHostDownloadUrl();
         if (!url || (btn && (btn.disabled || btn.classList.contains('rd-busy')))) return;
 
-        const label = btn && btn.querySelector('.rd-host-dl-label');
+        const labelFull = btn && btn.querySelector('.rd-host-dl-label-full');
+        const labelShort = btn && btn.querySelector('.rd-host-dl-label-short');
         if (btn) {
             btn.classList.add('rd-busy');
             btn.disabled = true;
-            if (label) label.textContent = 'Working\u2026';
+            if (labelFull) labelFull.textContent = 'Working\u2026';
+            if (labelShort) labelShort.textContent = '\u2026';
         }
 
         try {
@@ -5156,8 +5253,8 @@ const Scanner = {
         } finally {
             if (btn) {
                 btn.classList.remove('rd-busy');
-                btn.disabled = false;
-                if (label) label.textContent = 'Download via RD';
+                if (labelFull) labelFull.textContent = 'Download via RD';
+                if (labelShort) labelShort.textContent = 'Download';
                 this._updatePageActionBar();
             }
         }

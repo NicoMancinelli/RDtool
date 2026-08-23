@@ -2,7 +2,7 @@
 // =========================================================================
 
 const Config = {
-  VERSION: "41.8",
+  VERSION: "41.9",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -38,7 +38,6 @@ const Config = {
 
   defaultSettings: {
     hijack: false,
-    autoShow: true,
     magnetAction: "smart",
     filterExts: "nfo, txt, url, jpg, png, md, srt",
     smartFilter: false,
@@ -65,6 +64,7 @@ const Config = {
     useApiHostRegex: true,
     hostPageDownloadButton: true,
     inlinePageIcons: true,
+    blockInvalidDownloads: true,
   },
 
   isMobile:

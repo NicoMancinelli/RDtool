@@ -4,16 +4,18 @@ Copy for the [GreasyFork](https://greasyfork.org/) script page. Source and updat
 
 ## Description
 
-Real-Debrid Suite turns any webpage into a Real-Debrid workstation. Detect supported host links and magnets inline, unrestrict downloads, manage torrents and cloud history, and play media in-browser — all from a Liquid Glass dashboard that stays out of the way until you need it.
+Real-Debrid Suite turns any webpage into a Real-Debrid workstation. When the page has supported host links, magnets, or `.torrent` URLs, a compact top-right bar offers **Download via RD** (with a live validity check) and an expand control to open the full Liquid Glass dashboard — unrestrict downloads, manage torrents and cloud history, and play media in-browser.
 
 ## Features
 
-- **Page scanner** — Inline icons on supported host links and magnets across any site
+- **Page action bar** — Top-right download + expand when actionable links are detected; colored validity status on the download button
+- **Page scanner** — Inline icons on supported host links and magnets; settings for host-file button, inline icons, and API host regex
 - **Smart magnets** — Instant cache check; auto, video-only, all-files, or manual selection
 - **Links tab** — Paste, drag-and-drop, batch unrestrict, history, and export (plain / curl / wget)
 - **Torrents tab** — Live progress, speed/ETA, M3U export, bulk delete, dead torrent cleanup
 - **Cloud tab** — Real-Debrid download history with search, sort, and bulk actions
 - **Media player** — In-browser video/audio with PiP; deep links to VLC, IINA, Infuse
+- **In-app updates** — Check for a newer release and install from GitHub in one click
 - **Mobile** — Bottom sheet UI, swipe dismiss, pull-to-refresh, long-press menus
 - **Liquid Glass UI** — Dark glassmorphism that stays readable on any page
 
@@ -26,7 +28,7 @@ Real-Debrid Suite turns any webpage into a Real-Debrid workstation. Detect suppo
 
 ## Privacy
 
-Your Real-Debrid API token is stored **locally in your browser** via `GM_setValue` (Tampermonkey/Violentmonkey storage). It is sent only to `real-debrid.com` when the script calls the Real-Debrid API. RDtool does not phone home, collect analytics, or transmit your key to third parties.
+Your Real-Debrid API token is stored **locally in your browser** via `GM_setValue` (Tampermonkey/Violentmonkey storage). It is sent only to `real-debrid.com` when the script calls the Real-Debrid API. Update checks fetch the public userscript from GitHub. RDtool does not phone home, collect analytics, or transmit your key to third parties.
 
 ## Compatible Browsers
 

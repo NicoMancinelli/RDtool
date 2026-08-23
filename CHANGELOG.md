@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [41.9] - 2026-08-22
+
+### Added
+- **Multi-link cycle** — when several host links are on the page, a `1/N` control cycles which URL **Download via RD** targets.
+- **Block Invalid Downloads** setting (default on) — disables the download button when the validity check fails or the host is offline.
+
+### Changed
+- **Mobile download label** — top-right button shortens to **Download** on narrow screens.
+- Removed unused **Auto-Show Dashboard** setting (widget visibility is already content-based).
+- README and GreasyFork docs updated for the action bar, updates, and Page scanner settings; CI docs match the live workflow.
+
 ## [41.8] - 2026-08-22
 
 ### Changed
