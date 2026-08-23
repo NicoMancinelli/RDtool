@@ -22,6 +22,7 @@ const MODULE_ORDER = [
     '06-ui.js',
     '07-core.js',
     '07b-torrent-picker.js',
+    '08-subtitles.js',
     'tabs/00-index.js',
     'tabs/shared.js',
     'tabs/links.js',

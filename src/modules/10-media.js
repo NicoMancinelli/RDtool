@@ -6,12 +6,13 @@ const Media = {
     _dragMoveHandler: null,
     _dragUpHandler: null,
 
-    open(url, filename, playlist = null, mode = 'direct') {
+    open(url, filename, playlist = null, mode = 'direct', subtitles = null) {
         this.close();
 
         this._playlist = playlist;
         this._playlistIndex = 0;
         this._playMode = mode;
+        this._subtitles = Array.isArray(subtitles) ? subtitles.filter((s) => s && s.url) : [];
 
         const win = DOM.create('div', { id: 'rd-media-window' });
 
@@ -43,6 +44,16 @@ const Media = {
                 }
             }));
         }
+
+        // Subtitles toggle (video only, shown once tracks finish loading)
+        const ccBtn = (isVideo && this._subtitles.length)
+            ? DOM.create('span', {
+                className: 'rd-media-btn', id: 'rd-media-cc', textContent: 'CC',
+                style: 'display:none; font-size:10px; font-weight:bold;',
+                onClick: () => this._cycleSubtitles(document.getElementById('rd-cinema-player'))
+            })
+            : null;
+        if (ccBtn) controls.append(ccBtn);
 
         // Fullscreen toggle
         const maxBtn = DOM.create('span', {
@@ -92,6 +103,8 @@ const Media = {
                 video.addEventListener('ended', () => this._playlistNext());
             }
             win.append(video);
+            // Sidecar subtitles (fetched async; CC button appears when ready)
+            if (this._subtitles.length) this._attachSubtitles(video);
         } else if (isAudio) {
             const audioContainer = DOM.create('div', { style: 'display:flex; flex-direction:column; justify-content:center; align-items:center; height:calc(100% - 42px); background:var(--rd-bg-glass);' });
             audioContainer.append(DOM.create('div', { style: 'font-size:48px; margin-bottom:12px;', textContent: '\u{1F3B5}' }));
@@ -141,6 +154,7 @@ const Media = {
     close() {
         const win = document.getElementById('rd-media-window');
         if (!win) return;
+        this._subtitles = [];
         // Pause media
         const video = win.querySelector('video');
         const audio = win.querySelector('audio');
@@ -237,6 +251,9 @@ const Media = {
                 case 'm': case 'M':
                     media.muted = !media.muted;
                     break;
+                case 'c': case 'C':
+                    if (video) this._cycleSubtitles(video);
+                    break;
                 case 'Escape':
                     if (win.classList.contains('rd-fullscreen')) win.classList.remove('rd-fullscreen');
                     else this.close();
@@ -246,8 +263,60 @@ const Media = {
         document.addEventListener('keydown', this._keyHandler);
     },
 
-    _buildPlaylistPanel(playlist) {
-        const panel = DOM.create('div', {
+    // --- Subtitles (v42.0) -------------------------------------------------
+
+    /** Fetch + attach sidecar tracks; reveals the CC control when ready. */
+    async _attachSubtitles(video) {
+        if (!video || !this._subtitles.length) return;
+        const pending = this._subtitles.slice();
+        const loaded = [];
+        for (const sub of pending) {
+            const track = await Subtitles.loadTrack(sub);
+            if (track) loaded.push(track);
+        }
+        // Player may have been closed (or source changed) while fetching.
+        if (!video.isConnected || !document.getElementById('rd-media-window')) return;
+
+        for (const t of loaded) {
+            const el = document.createElement('track');
+            el.kind = 'subtitles';
+            if (t.lang) el.srclang = t.lang;
+            el.label = t.label + (t.lang ? ' [' + t.lang + ']' : '');
+            el.src = t.url;
+            video.appendChild(el);
+        }
+        const cc = document.getElementById('rd-media-cc');
+        if (cc && video.textTracks.length) {
+            video.textTracks[0].mode = 'showing';
+            this._syncCcLabel(cc, video);
+            cc.style.display = '';
+        }
+    },
+
+    /** CC button: cycle off -> track 1 -> ... -> off. */
+    _cycleSubtitles(video) {
+        if (!video || !video.textTracks.length) return;
+        const tts = video.textTracks;
+        let current = -1;
+        for (let i = 0; i < tts.length; i++) {
+            if (tts[i].mode === 'showing') { current = i; break; }
+        }
+        const next = current + 1 >= tts.length ? -1 : current + 1;
+        for (let i = 0; i < tts.length; i++) tts[i].mode = i === next ? 'showing' : 'disabled';
+        this._syncCcLabel(document.getElementById('rd-media-cc'), video);
+    },
+
+    _syncCcLabel(cc, video) {
+        if (!cc || !video) return;
+        let active = null;
+        for (let i = 0; i < video.textTracks.length; i++) {
+            if (video.textTracks[i].mode === 'showing') { active = video.textTracks[i]; break; }
+        }
+        cc.style.opacity = active ? '' : '0.4';
+        cc.title = active ? 'Subtitles: ' + active.label : 'Subtitles: off';
+    },
+
+    _buildPlaylistPanel(playlist) {        const panel = DOM.create('div', {
             style: 'max-height:120px; overflow-y:auto; border-top:1px solid var(--rd-glass-border); background:var(--rd-bg-glass);'
         });
         playlist.forEach((item, idx) => {
