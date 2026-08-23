@@ -294,7 +294,7 @@
                             UI.showToast('You are up to date');
                         }
                     } else {
-                        UI.showToast(res.error || 'Update check failed', 'error');
+                        UI.showToast(API.describeError(res, 'Update check failed'), 'error');
                     }
                 }
             }));
