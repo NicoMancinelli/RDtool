@@ -25,6 +25,20 @@ describe('DOM.iconSvg trusted registry', () => {
     });
 });
 
+describe('DOM.create children accept a single Node', () => {
+    it('appends a bare iconSvg node without throwing (v42.0 load regression)', () => {
+        const el = DOM.create('span', {}, DOM.iconSvg('lightning'));
+        expect(el.querySelector('svg')).toBeTruthy();
+        expect(el.childNodes.length).toBe(1);
+    });
+
+    it('still accepts an array of children', () => {
+        const el = DOM.create('span', {}, [DOM.iconSvg('lightning'), DOM.text('x')]);
+        expect(el.querySelector('svg')).toBeTruthy();
+        expect(el.textContent).toBe('x');
+    });
+});
+
 describe('DOM.create has no markup-injection path', () => {
     it('ignores htmlContent (removed as an attr handler)', () => {
         const el = DOM.create('div', { htmlContent: '<img src=x onerror=alert(1)>' });

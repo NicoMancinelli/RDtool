@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      42.1
+// @version      42.2
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -1016,7 +1016,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "42.1",
+  VERSION: "42.2",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -1854,6 +1854,10 @@ const Config = {
         },
 
         _appendChildren(parent, children) {
+            // Accept a single Node/string as well as an array — callers often
+            // pass DOM.iconSvg(...) directly as the third arg to create().
+            if (children == null) return;
+            if (!Array.isArray(children)) children = [children];
             for (const child of children) {
                 if (child == null) continue;
                 if (Array.isArray(child)) {
@@ -2159,7 +2163,7 @@ const Config = {
                 fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
             }
             const fab = DOM.create('div', fabAttrs, [
-                DOM.create('span', {}, DOM.iconSvg('lightning')),
+                DOM.create('span', {}, [DOM.iconSvg('lightning')]),
                 badge,
                 queueBadge
             ]);
@@ -2322,7 +2326,7 @@ const Config = {
             // Header
             const header = DOM.create('div', { className: 'rd-header' }, [
                 DOM.create('div', { style: 'display:flex;align-items:center;gap:8px;' }, [
-                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, DOM.iconSvg('lightning')),
+                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, [DOM.iconSvg('lightning')]),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
                         id: 'rd-version-badge',

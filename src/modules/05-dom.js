@@ -57,6 +57,10 @@
         },
 
         _appendChildren(parent, children) {
+            // Accept a single Node/string as well as an array — callers often
+            // pass DOM.iconSvg(...) directly as the third arg to create().
+            if (children == null) return;
+            if (!Array.isArray(children)) children = [children];
             for (const child of children) {
                 if (child == null) continue;
                 if (Array.isArray(child)) {
