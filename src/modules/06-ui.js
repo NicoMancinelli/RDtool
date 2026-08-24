@@ -1,5 +1,5 @@
 // --- Step 2: UI Module ---
-    const LIGHTNING_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
+    // Lightning mark now lives in the DOM._ICONS trusted registry (see 05-dom.js).
 
     function isTypingInField(target) {
         if (!target || !target.tagName) return false;
@@ -193,7 +193,7 @@
                 fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
             }
             const fab = DOM.create('div', fabAttrs, [
-                DOM.create('span', { htmlContent: LIGHTNING_SVG }),
+                DOM.create('span', {}, DOM.iconSvg('lightning')),
                 badge,
                 queueBadge
             ]);
@@ -350,7 +350,7 @@
             // Header
             const header = DOM.create('div', { className: 'rd-header' }, [
                 DOM.create('div', { style: 'display:flex;align-items:center;gap:8px;' }, [
-                    DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
+                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, DOM.iconSvg('lightning')),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
                         id: 'rd-version-badge',

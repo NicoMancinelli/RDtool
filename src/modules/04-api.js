@@ -9,6 +9,92 @@
         },
         _BASE: 'https://api.real-debrid.com/rest/1.0',
 
+        // --- Typed error model (v42.0) -----------------------------------
+        // Every failure resolves { ok:false, error:<short string>,
+        // errorType:<category> }. Categories drive deterministic user
+        // messaging via API.describeError(); the legacy `error` string is
+        // kept so existing call sites keep working.
+        //
+        //   auth       401/403 — key cleared, user must re-enter it
+        //   rate_limit 429 after retry budget exhausted
+        //   server     5xx
+        //   http       other >=400
+        //   network    GM_xmlhttpRequest transport failure
+        //   parse      response was not JSON
+        //   nokey      no API key configured at call time
+        //   file       local FileReader failure before upload
+
+        _error(errorType, message) {
+            return { ok: false, errorType: errorType, error: message };
+        },
+
+        _classifyStatus(status) {
+            if (status === 401 || status === 403) return 'auth';
+            if (status === 429) return 'rate_limit';
+            if (status >= 500) return 'server';
+            return 'http';
+        },
+
+        /** Deterministic, user-facing sentence for a failed result. */
+        describeError(res, fallback) {
+            const type = res && res.errorType;
+            const MESSAGES = {
+                auth: 'Session expired — re-enter your Real-Debrid API key',
+                rate_limit: 'Rate limited by Real-Debrid — try again shortly',
+                server: 'Real-Debrid is temporarily unavailable — try again soon',
+                http: res && res.error ? String(res.error) : '',
+                network: 'Network error — check your connection',
+                parse: 'Unexpected response from Real-Debrid',
+                nokey: 'Add your Real-Debrid API key in Settings',
+                file: 'Could not read the selected file'
+            };
+            return (type && MESSAGES[type]) || (res && res.error) || fallback || 'Request failed';
+        },
+
+        /** Shared GM_xmlhttpRequest onload/onerror pipeline for JSON endpoints. */
+        _responseHandler(resolve, retryFn) {
+            const finish = (result) => resolve(result);
+            const onload = (resp) => {
+                const status = resp.status;
+
+                if (status === 401 || status === 403) {
+                    Config.clearKey();
+                    return finish(API._error('auth', 'Auth Error'));
+                }
+
+                // Rate limit — retry once after Retry-After (default 5s)
+                if (status === 429 && retryFn) {
+                    const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
+                    return setTimeout(() => { retryFn().then(finish); }, retryAfter * 1000);
+                }
+
+                // Service unavailable — retry once after 2s
+                if (status === 503 && retryFn) {
+                    return setTimeout(() => { retryFn().then(finish); }, 2000);
+                }
+
+                if (status >= 400) {
+                    return finish(API._error(status >= 500 ? 'server' : 'http', 'API: ' + status));
+                }
+
+                // Success — parse JSON (handle empty responses from DELETE etc.)
+                const text = (resp.responseText || '').trim();
+                if (!text) {
+                    finish({ ok: true, data: null });
+                } else {
+                    try {
+                        finish({ ok: true, data: JSON.parse(text) });
+                    } catch (e) {
+                        finish(API._error('parse', 'Parse Error'));
+                    }
+                }
+            };
+            return {
+                onload: onload,
+                onerror: () => finish(API._error('network', 'Network Error'))
+            };
+        },
+
         _enqueue(fn) {
             return new Promise((resolve, reject) => {
                 this._queue.push(() => fn().then(resolve, reject));
@@ -33,7 +119,7 @@
         },
 
         request(method, endpoint, data, _retried) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+            if (!State.apiKey) return Promise.resolve(API._error('nokey', 'No API Key'));
 
             return this._enqueue(() => new Promise((resolve) => {
                 const url = this._BASE + endpoint;
@@ -45,55 +131,17 @@
                     body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
                 }
 
+                const handlers = API._responseHandler(resolve, _retried
+                    ? null
+                    : () => API.request(method, endpoint, data, true));
+
                 GM_xmlhttpRequest({
                     method: method,
                     url: url,
                     headers: headers,
                     data: body,
-                    onload: (resp) => {
-                        const status = resp.status;
-
-                        // Auth errors
-                        if (status === 401 || status === 403) {
-                            Config.clearKey();
-                            return resolve({ ok: false, error: 'Auth Error' });
-                        }
-
-                        // Rate limit — retry once
-                        if (status === 429 && !_retried) {
-                            const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, retryAfter * 1000);
-                        }
-
-                        // Service unavailable — retry once after 2s
-                        if (status === 503 && !_retried) {
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, 2000);
-                        }
-
-                        // Other errors
-                        if (status >= 400) {
-                            return resolve({ ok: false, error: 'API: ' + status });
-                        }
-
-                        // Success — parse JSON (handle empty responses from DELETE etc.)
-                        const text = (resp.responseText || '').trim();
-                        if (!text) {
-                            resolve({ ok: true, data: null });
-                        } else {
-                            try {
-                                resolve({ ok: true, data: JSON.parse(text) });
-                            } catch(e) {
-                                resolve({ ok: false, error: 'Parse Error' });
-                            }
-                        }
-                    },
-                    onerror: () => {
-                        resolve({ ok: false, error: 'Network Error' });
-                    }
+                    onload: handlers.onload,
+                    onerror: handlers.onerror
                 });
             }));
         },
@@ -175,7 +223,7 @@
         },
 
         upload(endpoint, file, _retried) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+            if (!State.apiKey) return Promise.resolve(API._error('nokey', 'No API Key'));
 
             return this._enqueue(() => new Promise((resolve) => {
                 const reader = new FileReader();
@@ -200,6 +248,10 @@
                     body.set(uint8, headerBytes.length);
                     body.set(footerBytes, headerBytes.length + uint8.length);
 
+                    const handlers = API._responseHandler(resolve, _retried
+                        ? null
+                        : () => API.upload(endpoint, file, true));
+
                     GM_xmlhttpRequest({
                         method: 'PUT',
                         url: this._BASE + endpoint,
@@ -208,49 +260,12 @@
                             'Content-Type': 'multipart/form-data; boundary=' + boundary
                         },
                         data: body.buffer,
-                        onload: (resp) => {
-                            const status = resp.status;
-
-                            if (status === 401 || status === 403) {
-                                Config.clearKey();
-                                return resolve({ ok: false, error: 'Auth Error' });
-                            }
-
-                            if (status === 429 && !_retried) {
-                                const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
-                                return setTimeout(() => {
-                                    this.upload(endpoint, file, true).then(resolve);
-                                }, retryAfter * 1000);
-                            }
-
-                            if (status === 503 && !_retried) {
-                                return setTimeout(() => {
-                                    this.upload(endpoint, file, true).then(resolve);
-                                }, 2000);
-                            }
-
-                            if (status >= 400) {
-                                return resolve({ ok: false, error: 'API: ' + status });
-                            }
-
-                            const text = (resp.responseText || '').trim();
-                            if (!text) {
-                                resolve({ ok: true, data: null });
-                            } else {
-                                try {
-                                    resolve({ ok: true, data: JSON.parse(text) });
-                                } catch(e) {
-                                    resolve({ ok: false, error: 'Parse Error' });
-                                }
-                            }
-                        },
-                        onerror: () => {
-                            resolve({ ok: false, error: 'Network Error' });
-                        }
+                        onload: handlers.onload,
+                        onerror: handlers.onerror
                     });
                 };
                 reader.onerror = () => {
-                    resolve({ ok: false, error: 'File Read Error' });
+                    resolve(API._error('file', 'File Read Error'));
                 };
                 reader.readAsArrayBuffer(file);
             }));

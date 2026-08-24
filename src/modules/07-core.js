@@ -175,13 +175,13 @@
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const host = await API.resolveTorrentHost();
         const endpoint = host ? '/torrents/addMagnet?host=' + encodeURIComponent(host) : '/torrents/addMagnet';
-        const { ok, data, error } = await API.post(endpoint, { magnet: magnet });
-        if (!ok) {
-            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
+        const magnetRes = await API.post(endpoint, { magnet: magnet });
+        if (!magnetRes.ok) {
+            addToHistory({ type: 'error', msg: 'Magnet Error — ' + API.describeError(magnetRes, 'Magnet failed'), sourceUrl: magnet });
             return;
         }
 
-        const torrentId = data.id;
+        const torrentId = magnetRes.data.id;
 
         if (State.settings.magnetAction === 'all') {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
@@ -227,31 +227,34 @@
             playlist.push({ url: resolved.url, filename: name, mode: resolved.mode });
         }
         if (playlist.length && typeof Media !== 'undefined') {
-            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode);
+            const subtitles = (typeof Subtitles !== 'undefined')
+                ? Subtitles.pickSubtitleFiles(torrent.links)
+                : [];
+            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode, subtitles);
         }
     }
 
     async function deleteAllCloudItems() {
-        const { ok, error } = await API.deleteAllDownloads();
-        if (ok) {
+        const res = await API.deleteAllDownloads();
+        if (res.ok) {
             State.cachedCloud = [];
             GM_setValue('rd_cached_cloud', '[]');
             if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.render();
             UI.showToast('All cloud items deleted');
         } else {
-            UI.showToast('Delete failed: ' + error, 'error');
+            UI.showToast(API.describeError(res, 'Delete failed'), 'error');
         }
     }
 
     async function deleteAllTorrentItems() {
-        const { ok, error } = await API.deleteAllTorrents();
-        if (ok) {
+        const torrentDeleteRes = await API.deleteAllTorrents();
+        if (torrentDeleteRes.ok) {
             State.cachedTorrents = [];
             GM_setValue('rd_cached_torrents', '[]');
             if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.render();
             UI.showToast('All torrents deleted');
         } else {
-            UI.showToast('Delete failed: ' + error, 'error');
+            UI.showToast(API.describeError(torrentDeleteRes, 'Delete failed'), 'error');
         }
     }
 

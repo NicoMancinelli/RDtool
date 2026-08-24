@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      41.9
+// @version      42.0
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -1016,7 +1016,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "41.9",
+  VERSION: "42.0",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -1531,6 +1531,92 @@ const Config = {
         },
         _BASE: 'https://api.real-debrid.com/rest/1.0',
 
+        // --- Typed error model (v42.0) -----------------------------------
+        // Every failure resolves { ok:false, error:<short string>,
+        // errorType:<category> }. Categories drive deterministic user
+        // messaging via API.describeError(); the legacy `error` string is
+        // kept so existing call sites keep working.
+        //
+        //   auth       401/403 — key cleared, user must re-enter it
+        //   rate_limit 429 after retry budget exhausted
+        //   server     5xx
+        //   http       other >=400
+        //   network    GM_xmlhttpRequest transport failure
+        //   parse      response was not JSON
+        //   nokey      no API key configured at call time
+        //   file       local FileReader failure before upload
+
+        _error(errorType, message) {
+            return { ok: false, errorType: errorType, error: message };
+        },
+
+        _classifyStatus(status) {
+            if (status === 401 || status === 403) return 'auth';
+            if (status === 429) return 'rate_limit';
+            if (status >= 500) return 'server';
+            return 'http';
+        },
+
+        /** Deterministic, user-facing sentence for a failed result. */
+        describeError(res, fallback) {
+            const type = res && res.errorType;
+            const MESSAGES = {
+                auth: 'Session expired — re-enter your Real-Debrid API key',
+                rate_limit: 'Rate limited by Real-Debrid — try again shortly',
+                server: 'Real-Debrid is temporarily unavailable — try again soon',
+                http: res && res.error ? String(res.error) : '',
+                network: 'Network error — check your connection',
+                parse: 'Unexpected response from Real-Debrid',
+                nokey: 'Add your Real-Debrid API key in Settings',
+                file: 'Could not read the selected file'
+            };
+            return (type && MESSAGES[type]) || (res && res.error) || fallback || 'Request failed';
+        },
+
+        /** Shared GM_xmlhttpRequest onload/onerror pipeline for JSON endpoints. */
+        _responseHandler(resolve, retryFn) {
+            const finish = (result) => resolve(result);
+            const onload = (resp) => {
+                const status = resp.status;
+
+                if (status === 401 || status === 403) {
+                    Config.clearKey();
+                    return finish(API._error('auth', 'Auth Error'));
+                }
+
+                // Rate limit — retry once after Retry-After (default 5s)
+                if (status === 429 && retryFn) {
+                    const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
+                    return setTimeout(() => { retryFn().then(finish); }, retryAfter * 1000);
+                }
+
+                // Service unavailable — retry once after 2s
+                if (status === 503 && retryFn) {
+                    return setTimeout(() => { retryFn().then(finish); }, 2000);
+                }
+
+                if (status >= 400) {
+                    return finish(API._error(status >= 500 ? 'server' : 'http', 'API: ' + status));
+                }
+
+                // Success — parse JSON (handle empty responses from DELETE etc.)
+                const text = (resp.responseText || '').trim();
+                if (!text) {
+                    finish({ ok: true, data: null });
+                } else {
+                    try {
+                        finish({ ok: true, data: JSON.parse(text) });
+                    } catch (e) {
+                        finish(API._error('parse', 'Parse Error'));
+                    }
+                }
+            };
+            return {
+                onload: onload,
+                onerror: () => finish(API._error('network', 'Network Error'))
+            };
+        },
+
         _enqueue(fn) {
             return new Promise((resolve, reject) => {
                 this._queue.push(() => fn().then(resolve, reject));
@@ -1555,7 +1641,7 @@ const Config = {
         },
 
         request(method, endpoint, data, _retried) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+            if (!State.apiKey) return Promise.resolve(API._error('nokey', 'No API Key'));
 
             return this._enqueue(() => new Promise((resolve) => {
                 const url = this._BASE + endpoint;
@@ -1567,55 +1653,17 @@ const Config = {
                     body = Object.keys(data).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(data[k])).join('&');
                 }
 
+                const handlers = API._responseHandler(resolve, _retried
+                    ? null
+                    : () => API.request(method, endpoint, data, true));
+
                 GM_xmlhttpRequest({
                     method: method,
                     url: url,
                     headers: headers,
                     data: body,
-                    onload: (resp) => {
-                        const status = resp.status;
-
-                        // Auth errors
-                        if (status === 401 || status === 403) {
-                            Config.clearKey();
-                            return resolve({ ok: false, error: 'Auth Error' });
-                        }
-
-                        // Rate limit — retry once
-                        if (status === 429 && !_retried) {
-                            const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, retryAfter * 1000);
-                        }
-
-                        // Service unavailable — retry once after 2s
-                        if (status === 503 && !_retried) {
-                            return setTimeout(() => {
-                                this.request(method, endpoint, data, true).then(resolve);
-                            }, 2000);
-                        }
-
-                        // Other errors
-                        if (status >= 400) {
-                            return resolve({ ok: false, error: 'API: ' + status });
-                        }
-
-                        // Success — parse JSON (handle empty responses from DELETE etc.)
-                        const text = (resp.responseText || '').trim();
-                        if (!text) {
-                            resolve({ ok: true, data: null });
-                        } else {
-                            try {
-                                resolve({ ok: true, data: JSON.parse(text) });
-                            } catch(e) {
-                                resolve({ ok: false, error: 'Parse Error' });
-                            }
-                        }
-                    },
-                    onerror: () => {
-                        resolve({ ok: false, error: 'Network Error' });
-                    }
+                    onload: handlers.onload,
+                    onerror: handlers.onerror
                 });
             }));
         },
@@ -1697,7 +1745,7 @@ const Config = {
         },
 
         upload(endpoint, file, _retried) {
-            if (!State.apiKey) return Promise.resolve({ ok: false, error: 'No API Key' });
+            if (!State.apiKey) return Promise.resolve(API._error('nokey', 'No API Key'));
 
             return this._enqueue(() => new Promise((resolve) => {
                 const reader = new FileReader();
@@ -1722,6 +1770,10 @@ const Config = {
                     body.set(uint8, headerBytes.length);
                     body.set(footerBytes, headerBytes.length + uint8.length);
 
+                    const handlers = API._responseHandler(resolve, _retried
+                        ? null
+                        : () => API.upload(endpoint, file, true));
+
                     GM_xmlhttpRequest({
                         method: 'PUT',
                         url: this._BASE + endpoint,
@@ -1730,49 +1782,12 @@ const Config = {
                             'Content-Type': 'multipart/form-data; boundary=' + boundary
                         },
                         data: body.buffer,
-                        onload: (resp) => {
-                            const status = resp.status;
-
-                            if (status === 401 || status === 403) {
-                                Config.clearKey();
-                                return resolve({ ok: false, error: 'Auth Error' });
-                            }
-
-                            if (status === 429 && !_retried) {
-                                const retryAfter = parseInt(resp.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 5;
-                                return setTimeout(() => {
-                                    this.upload(endpoint, file, true).then(resolve);
-                                }, retryAfter * 1000);
-                            }
-
-                            if (status === 503 && !_retried) {
-                                return setTimeout(() => {
-                                    this.upload(endpoint, file, true).then(resolve);
-                                }, 2000);
-                            }
-
-                            if (status >= 400) {
-                                return resolve({ ok: false, error: 'API: ' + status });
-                            }
-
-                            const text = (resp.responseText || '').trim();
-                            if (!text) {
-                                resolve({ ok: true, data: null });
-                            } else {
-                                try {
-                                    resolve({ ok: true, data: JSON.parse(text) });
-                                } catch(e) {
-                                    resolve({ ok: false, error: 'Parse Error' });
-                                }
-                            }
-                        },
-                        onerror: () => {
-                            resolve({ ok: false, error: 'Network Error' });
-                        }
+                        onload: handlers.onload,
+                        onerror: handlers.onerror
                     });
                 };
                 reader.onerror = () => {
-                    resolve({ ok: false, error: 'File Read Error' });
+                    resolve(API._error('file', 'File Read Error'));
                 };
                 reader.readAsArrayBuffer(file);
             }));
@@ -1782,6 +1797,21 @@ const Config = {
 
 // --- DOM Helper Module ---
     const DOM = {
+        // Trusted static SVG registry. The ONLY sanctioned path for markup
+        // injection: strings here are compile-time constants shipped with the
+        // script — never interpolate user/API data into these entries.
+        _ICONS: {
+            lightning: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>'
+        },
+
+        iconSvg(name) {
+            const svg = DOM._ICONS[name];
+            if (!svg) return null;
+            const holder = document.createElement('span');
+            holder.innerHTML = svg; // static trusted registry string only
+            return holder.firstElementChild;
+        },
+
         create(tag, attrs = {}, children = []) {
             const el = document.createElement(tag);
             for (const [key, value] of Object.entries(attrs)) {
@@ -1789,8 +1819,6 @@ const Config = {
                     el.className = value;
                 } else if (key === 'textContent') {
                     el.textContent = value;
-                } else if (key === 'htmlContent') {
-                    el.innerHTML = value;
                 } else if (key === 'style' && typeof value === 'object') {
                     for (const [prop, val] of Object.entries(value)) {
                         el.style[prop] = val;
@@ -1937,7 +1965,7 @@ const Config = {
 
 
 // --- Step 2: UI Module ---
-    const LIGHTNING_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>';
+    // Lightning mark now lives in the DOM._ICONS trusted registry (see 05-dom.js).
 
     function isTypingInField(target) {
         if (!target || !target.tagName) return false;
@@ -2131,7 +2159,7 @@ const Config = {
                 fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
             }
             const fab = DOM.create('div', fabAttrs, [
-                DOM.create('span', { htmlContent: LIGHTNING_SVG }),
+                DOM.create('span', {}, DOM.iconSvg('lightning')),
                 badge,
                 queueBadge
             ]);
@@ -2288,7 +2316,7 @@ const Config = {
             // Header
             const header = DOM.create('div', { className: 'rd-header' }, [
                 DOM.create('div', { style: 'display:flex;align-items:center;gap:8px;' }, [
-                    DOM.create('span', { htmlContent: LIGHTNING_SVG, style: 'display:flex;color:var(--rd-accent);' }),
+                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, DOM.iconSvg('lightning')),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
                         id: 'rd-version-badge',
@@ -2808,13 +2836,13 @@ const Config = {
         if (!State.queueProcessing) UI.showToast('Sending Magnet...');
         const host = await API.resolveTorrentHost();
         const endpoint = host ? '/torrents/addMagnet?host=' + encodeURIComponent(host) : '/torrents/addMagnet';
-        const { ok, data, error } = await API.post(endpoint, { magnet: magnet });
-        if (!ok) {
-            addToHistory({ type: 'error', msg: 'Magnet Error: ' + error, sourceUrl: magnet });
+        const magnetRes = await API.post(endpoint, { magnet: magnet });
+        if (!magnetRes.ok) {
+            addToHistory({ type: 'error', msg: 'Magnet Error — ' + API.describeError(magnetRes, 'Magnet failed'), sourceUrl: magnet });
             return;
         }
 
-        const torrentId = data.id;
+        const torrentId = magnetRes.data.id;
 
         if (State.settings.magnetAction === 'all') {
             await API.post('/torrents/selectFiles/' + torrentId, { files: 'all' });
@@ -2860,31 +2888,34 @@ const Config = {
             playlist.push({ url: resolved.url, filename: name, mode: resolved.mode });
         }
         if (playlist.length && typeof Media !== 'undefined') {
-            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode);
+            const subtitles = (typeof Subtitles !== 'undefined')
+                ? Subtitles.pickSubtitleFiles(torrent.links)
+                : [];
+            Media.open(playlist[0].url, playlist[0].filename, playlist, playlist[0].mode, subtitles);
         }
     }
 
     async function deleteAllCloudItems() {
-        const { ok, error } = await API.deleteAllDownloads();
-        if (ok) {
+        const res = await API.deleteAllDownloads();
+        if (res.ok) {
             State.cachedCloud = [];
             GM_setValue('rd_cached_cloud', '[]');
             if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.render();
             UI.showToast('All cloud items deleted');
         } else {
-            UI.showToast('Delete failed: ' + error, 'error');
+            UI.showToast(API.describeError(res, 'Delete failed'), 'error');
         }
     }
 
     async function deleteAllTorrentItems() {
-        const { ok, error } = await API.deleteAllTorrents();
-        if (ok) {
+        const torrentDeleteRes = await API.deleteAllTorrents();
+        if (torrentDeleteRes.ok) {
             State.cachedTorrents = [];
             GM_setValue('rd_cached_torrents', '[]');
             if (State.currentTab === Config.TAB_KEYS.TORRENTS) Tabs.Torrents.render();
             UI.showToast('All torrents deleted');
         } else {
-            UI.showToast('Delete failed: ' + error, 'error');
+            UI.showToast(API.describeError(torrentDeleteRes, 'Delete failed'), 'error');
         }
     }
 
@@ -3246,6 +3277,199 @@ const Config = {
             });
         });
     }
+
+
+// --- Subtitle Module ---
+// =========================================================================
+// Sidecar subtitle support for the Media player (v42.0).
+//
+// Detects .srt/.ass/.ssa/.vtt siblings in torrent link lists, converts
+// SRT/ASS text to WebVTT (the only format <track> understands), and hands
+// blob: URLs back to Media. All network access goes through
+// GM_xmlhttpRequest because host-file servers rarely send CORS headers,
+// which plain fetch()-based <track src> loading requires.
+//
+// The text transforms (srtToVtt / assToVtt / guessLang / pickSubtitleFiles)
+// are pure functions covered by tests/subtitles.test.mjs.
+
+const Subtitles = {
+    SUBTITLE_RE: /\.(srt|ass|ssa|vtt)$/i,
+    _CUE_TIMING_RE: /^\s*(\d{1,2}:)?\d{1,2}:\d{1,2}[.,]\d{1,3}\s-->\s(\d{1,2}:)?\d{1,2}:\d{1,2}[.,]\d{1,3}/,
+    _LANG_MAP: {
+        eng: 'en', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', spa: 'es',
+        ita: 'it', por: 'pt', rus: 'ru', dut: 'nl', nld: 'nl', pol: 'pl',
+        tur: 'tr', jpn: 'ja', kor: 'ko', chi: 'zh', zho: 'zh', ara: 'ar',
+        hin: 'hi', swe: 'sv', nor: 'no', dan: 'da', fin: 'fi'
+    },
+
+    /** True when a filename looks like a sidecar subtitle file. */
+    isSubtitleFile(filename) {
+        return typeof filename === 'string' && Subtitles.SUBTITLE_RE.test(filename);
+    },
+
+    /**
+     * Pick subtitle entries out of a mixed torrent/cloud link list.
+     * Returns [{ url, filename }] preserving original order.
+     */
+    pickSubtitleFiles(links) {
+        const subs = [];
+        for (const url of Array.isArray(links) ? links : []) {
+            if (typeof url !== 'string') continue;
+            const name = decodeURIComponent(url.split('?')[0].split('/').pop() || '');
+            if (Subtitles.isSubtitleFile(name)) subs.push({ url: url, filename: name });
+        }
+        return subs;
+    },
+
+    /** Best-effort BCP-47-ish language guess from naming: movie.en.srt, show.eng.srt */
+    guessLang(filename) {
+        const m = (filename || '').match(/\.([a-z]{2,3})\.(?:srt|ass|ssa|vtt)$/i);
+        if (!m) return '';
+        const code = m[1].toLowerCase();
+        if (Subtitles._LANG_MAP[code]) return Subtitles._LANG_MAP[code];
+        return code.length === 2 ? code : '';
+    },
+
+    /** Human label for the track menu: basename with language token removed. */
+    label(filename) {
+        let base = (filename || '').split('/').pop().replace(/\.(srt|ass|ssa|vtt)$/i, '');
+        const m = base.match(/\.([a-z]{2,3})$/i);
+        if (m) {
+            const code = m[1].toLowerCase();
+            const lang = Subtitles.guessLang(base + '.srt');
+            // Strip the token only when it is a real language code (either
+            // spelling) — "movie.proper.srt" keeps its release tag.
+            if (lang && (code === lang || Subtitles._LANG_MAP[code] === lang)) {
+                base = base.slice(0, -m[0].length);
+            }
+        }
+        return base;
+    },
+
+    /** Dispatch to the right converter based on the filename extension. */
+    toVtt(text, filename) {
+        if (!text) return '';
+        if (/\.vtt$/i.test(filename || '')) {
+            return /^WEBVTT/i.test(text.trim()) ? text : 'WEBVTT\n\n' + text.trim() + '\n';
+        }
+        if (/\.ass$|\.ssa$/i.test(filename || '')) return Subtitles.assToVtt(text);
+        return Subtitles.srtToVtt(text);
+    },
+
+    /**
+     * SRT -> WebVTT. Handles both CRLF and LF input, drops ordinal cue
+     * numbers, normalizes ",mmm" millisecond separators to ".mmm", and
+     * prepends the WEBVTT magic when missing.
+     */
+    srtToVtt(text) {
+        const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+        const out = ['WEBVTT'];
+        let sawCue = false;
+        for (const line of lines) {
+            if (Subtitles._CUE_TIMING_RE.test(line)) {
+                out.push('');
+                // ",mmm" -> ".mmm" with milliseconds padded to 3 digits
+                out.push(line.replace(/(\d{1,2}:\d{1,2}:\d{1,2}),(\d{1,3})/g,
+                    (all, ts, ms) => ts + '.' + ms.padEnd(3, '0')).trim());
+                sawCue = true;
+            } else if (/^\s*\d+\s*$/.test(line)) {
+                continue; // ordinal counter — WebVTT allows but doesn't need it
+            } else {
+                out.push(line.replace(/\s+$/, ''));
+            }
+        }
+        return sawCue ? out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n' : '';
+    },
+
+    /**
+     * ASS/SSA -> WebVTT. Reads the [Events] Format line to locate the
+     * Start/End/Text columns, converts H:MM:SS.CC timings, strips {...}
+     * override blocks, and turns \N/\n escapes into real newlines.
+     */
+    assToVtt(text) {
+        const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+        let formatCols = null;
+        const cues = [];
+
+        const tsToVtt = (ts) => {
+            const m = ts.trim().match(/^(\d+):(\d{1,2}):(\d{1,2})[.,](\d{1,3})$/);
+            if (!m) return null;
+            const cs = m[4].length === 1 ? m[4] + '0' : m[4]; // centiseconds -> millis
+            return [
+                m[1].padStart(2, '0'),
+                m[2].padStart(2, '0'),
+                m[3].padStart(2, '0')
+            ].join(':') + '.' + cs.padEnd(3, '0');
+        };
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (/^format\s*:/i.test(trimmed)) {
+                formatCols = trimmed.slice(trimmed.indexOf(':') + 1).split(',').map((c) => c.trim().toLowerCase());
+                continue;
+            }
+            if (/^dialogue\s*:/i.test(trimmed)) {
+                const parts = trimmed.slice(trimmed.indexOf(':') + 1).split(',');
+                const cols = formatCols || ['layer', 'start', 'end', 'style', 'name', 'marginl', 'marginr', 'marginv', 'effect', 'text'];
+                const col = (name) => cols.indexOf(name);
+                if (col('start') < 0 || col('end') < 0 || col('text') < 0) continue;
+                const start = tsToVtt(parts[col('start')] || '');
+                const end = tsToVtt(parts[col('end')] || '');
+                // Text is the last field and may itself contain commas.
+                const textCol = col('text');
+                const rawText = cols[textCol] === 'text'
+                    ? parts.slice(textCol).join(',')
+                    : (parts[textCol] || '');
+                if (start == null || end == null) continue;
+                const body = rawText
+                    .replace(/\{[^}]*\}/g, '')   // override/drawing blocks
+                    .replace(/\\N|\\n/g, '\n')   // hard breaks
+                    .trim();
+                if (!body) continue;
+                cues.push(start + ' --> ' + end + '\n' + body);
+            }
+        }
+        if (!cues.length) return '';
+        return 'WEBVTT\n\n' + cues.join('\n\n') + '\n';
+    },
+
+    /**
+     * Fetch + convert one subtitle entry into a playable track descriptor
+     * ({ url: blobUrl, lang, label }) or null when unreachable/unparsable.
+     * Blob URLs are registered on Media._objectUrls so Media.close()
+     * revokes them with the rest of the player's lifecycle.
+     */
+    async loadTrack(sub) {
+        if (!sub || !sub.url) return null;
+        const raw = await new Promise((resolve) => {
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: sub.url,
+                    timeout: 15000,
+                    onload: (r) => resolve(r && r.responseText),
+                    onerror: () => resolve(null),
+                    onabort: () => resolve(null),
+                    ontimeout: () => resolve(null)
+                });
+            } catch (e) {
+                resolve(null);
+            }
+        });
+        if (!raw) return null;
+        const vtt = Subtitles.toVtt(raw, sub.filename);
+        if (!vtt) return null;
+        const blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+        if (typeof Media !== 'undefined' && Array.isArray(Media._objectUrls)) {
+            Media._objectUrls.push(blobUrl);
+        }
+        return {
+            url: blobUrl,
+            lang: Subtitles.guessLang(sub.filename),
+            label: Subtitles.label(sub.filename) || 'Subtitles'
+        };
+    }
+};
 
 
 // ===================== Tabs (Links + Page) =====================
@@ -4602,7 +4826,7 @@ const Config = {
                             UI.showToast('You are up to date');
                         }
                     } else {
-                        UI.showToast(res.error || 'Update check failed', 'error');
+                        UI.showToast(API.describeError(res, 'Update check failed'), 'error');
                     }
                 }
             }));
@@ -5468,12 +5692,13 @@ const Media = {
     _dragMoveHandler: null,
     _dragUpHandler: null,
 
-    open(url, filename, playlist = null, mode = 'direct') {
+    open(url, filename, playlist = null, mode = 'direct', subtitles = null) {
         this.close();
 
         this._playlist = playlist;
         this._playlistIndex = 0;
         this._playMode = mode;
+        this._subtitles = Array.isArray(subtitles) ? subtitles.filter((s) => s && s.url) : [];
 
         const win = DOM.create('div', { id: 'rd-media-window' });
 
@@ -5505,6 +5730,16 @@ const Media = {
                 }
             }));
         }
+
+        // Subtitles toggle (video only, shown once tracks finish loading)
+        const ccBtn = (isVideo && this._subtitles.length)
+            ? DOM.create('span', {
+                className: 'rd-media-btn', id: 'rd-media-cc', textContent: 'CC',
+                style: 'display:none; font-size:10px; font-weight:bold;',
+                onClick: () => this._cycleSubtitles(document.getElementById('rd-cinema-player'))
+            })
+            : null;
+        if (ccBtn) controls.append(ccBtn);
 
         // Fullscreen toggle
         const maxBtn = DOM.create('span', {
@@ -5554,6 +5789,8 @@ const Media = {
                 video.addEventListener('ended', () => this._playlistNext());
             }
             win.append(video);
+            // Sidecar subtitles (fetched async; CC button appears when ready)
+            if (this._subtitles.length) this._attachSubtitles(video);
         } else if (isAudio) {
             const audioContainer = DOM.create('div', { style: 'display:flex; flex-direction:column; justify-content:center; align-items:center; height:calc(100% - 42px); background:var(--rd-bg-glass);' });
             audioContainer.append(DOM.create('div', { style: 'font-size:48px; margin-bottom:12px;', textContent: '\u{1F3B5}' }));
@@ -5603,6 +5840,7 @@ const Media = {
     close() {
         const win = document.getElementById('rd-media-window');
         if (!win) return;
+        this._subtitles = [];
         // Pause media
         const video = win.querySelector('video');
         const audio = win.querySelector('audio');
@@ -5699,6 +5937,9 @@ const Media = {
                 case 'm': case 'M':
                     media.muted = !media.muted;
                     break;
+                case 'c': case 'C':
+                    if (video) this._cycleSubtitles(video);
+                    break;
                 case 'Escape':
                     if (win.classList.contains('rd-fullscreen')) win.classList.remove('rd-fullscreen');
                     else this.close();
@@ -5708,8 +5949,60 @@ const Media = {
         document.addEventListener('keydown', this._keyHandler);
     },
 
-    _buildPlaylistPanel(playlist) {
-        const panel = DOM.create('div', {
+    // --- Subtitles (v42.0) -------------------------------------------------
+
+    /** Fetch + attach sidecar tracks; reveals the CC control when ready. */
+    async _attachSubtitles(video) {
+        if (!video || !this._subtitles.length) return;
+        const pending = this._subtitles.slice();
+        const loaded = [];
+        for (const sub of pending) {
+            const track = await Subtitles.loadTrack(sub);
+            if (track) loaded.push(track);
+        }
+        // Player may have been closed (or source changed) while fetching.
+        if (!video.isConnected || !document.getElementById('rd-media-window')) return;
+
+        for (const t of loaded) {
+            const el = document.createElement('track');
+            el.kind = 'subtitles';
+            if (t.lang) el.srclang = t.lang;
+            el.label = t.label + (t.lang ? ' [' + t.lang + ']' : '');
+            el.src = t.url;
+            video.appendChild(el);
+        }
+        const cc = document.getElementById('rd-media-cc');
+        if (cc && video.textTracks.length) {
+            video.textTracks[0].mode = 'showing';
+            this._syncCcLabel(cc, video);
+            cc.style.display = '';
+        }
+    },
+
+    /** CC button: cycle off -> track 1 -> ... -> off. */
+    _cycleSubtitles(video) {
+        if (!video || !video.textTracks.length) return;
+        const tts = video.textTracks;
+        let current = -1;
+        for (let i = 0; i < tts.length; i++) {
+            if (tts[i].mode === 'showing') { current = i; break; }
+        }
+        const next = current + 1 >= tts.length ? -1 : current + 1;
+        for (let i = 0; i < tts.length; i++) tts[i].mode = i === next ? 'showing' : 'disabled';
+        this._syncCcLabel(document.getElementById('rd-media-cc'), video);
+    },
+
+    _syncCcLabel(cc, video) {
+        if (!cc || !video) return;
+        let active = null;
+        for (let i = 0; i < video.textTracks.length; i++) {
+            if (video.textTracks[i].mode === 'showing') { active = video.textTracks[i]; break; }
+        }
+        cc.style.opacity = active ? '' : '0.4';
+        cc.title = active ? 'Subtitles: ' + active.label : 'Subtitles: off';
+    },
+
+    _buildPlaylistPanel(playlist) {        const panel = DOM.create('div', {
             style: 'max-height:120px; overflow-y:auto; border-top:1px solid var(--rd-glass-border); background:var(--rd-bg-glass);'
         });
         playlist.forEach((item, idx) => {

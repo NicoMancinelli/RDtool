@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [42.0] - 2026-08-23
+
+### Added
+- **Subtitle support in the player** — completed torrents with sidecar subtitle files (`.srt`, `.ass`/`.ssa`, `.vtt`) now show a **CC** control in the media window (keyboard: `C`). SRT and ASS/SSA cues are converted to WebVTT client-side; languages are guessed from filenames (`movie.en.srt`, `show.eng.ass`) and fetched through the userscript sandbox so host CORS policies don't matter.
+- **Typed API error model** — every failed Real-Debrid call is categorized (`auth`, `rate_limit`, `server`, `http`, `network`, `parse`, `nokey`, `file`) and surfaces one deterministic, actionable message via `API.describeError` instead of raw status strings.
+- `docs/ARCHITECTURE.md` — module map, layering rules, and data-flow overview.
+- `docs/RELEASE.md` — version bump procedure, release checklist, and manual smoke test.
+
+### Changed
+- **DOM safety hardening** — removed the generic `htmlContent` escape hatch from `DOM.create()`; markup injection now exists only inside the trusted `DOM._ICONS` registry via `DOM.iconSvg(name)`, enforced by a source-guard test.
+
 ## [41.9] - 2026-08-22
 
 ### Added
