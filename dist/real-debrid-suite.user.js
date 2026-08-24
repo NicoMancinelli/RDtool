@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      42.0
+// @version      42.1
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -1016,7 +1016,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "42.0",
+  VERSION: "42.1",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
