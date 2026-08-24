@@ -9,7 +9,7 @@
             if (!files) {
                 const infoRes = await API.get('/torrents/info/' + torrentId);
                 if (!infoRes.ok || !infoRes.data || !infoRes.data.files) {
-                    UI.showToast('Could not load torrent files', 'error');
+                    UI.showToast(API.describeError(infoRes, 'Could not load torrent files'), 'error');
                     return;
                 }
                 files = infoRes.data.files;
