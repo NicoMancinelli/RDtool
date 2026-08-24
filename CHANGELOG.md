@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [42.1] - 2026-08-24
+
+### Changed
+- **Typed error coverage** — remaining API-failure surfaces (unrestrict link/folder, convert points, cloud rename, torrent file picker, traffic details, login verification) now use `API.describeError()` for consistent, actionable messages. Login still shows “Invalid API key” for auth/HTTP rejections, but reports network/server/rate-limit failures accurately instead of blaming the key.
+
 ## [42.0] - 2026-08-23
 
 ### Added
