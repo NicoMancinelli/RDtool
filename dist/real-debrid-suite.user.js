@@ -2209,7 +2209,13 @@ const Config = {
                         if (!userRes.ok) {
                             Config.clearKey();
                             if (prevKey) Config.saveKey(prevKey);
-                            UI.showToast('Invalid API key — check and try again', 'error');
+                            // A rejected key is the expected failure; anything
+                            // else (network, server, rate limit) deserves its
+                            // own diagnosis instead of blaming the key.
+                            const msg = (userRes.errorType === 'auth' || userRes.errorType === 'http')
+                                ? 'Invalid API key — check and try again'
+                                : API.describeError(userRes, 'Could not verify API key');
+                            UI.showToast(msg, 'error');
                             return;
                         }
                         UI.showToast('API key saved! Reloading...');
@@ -2695,16 +2701,16 @@ const Config = {
             return cached.url;
         }
 
-        const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
-        if (!ok) {
-            addToHistory({ type: 'error', msg: 'Unrestrict failed: ' + error, sourceUrl: url });
+        const res = await API.post('/unrestrict/link', { link: url });
+        if (!res.ok) {
+            addToHistory({ type: 'error', msg: API.describeError(res, 'Unrestrict failed'), sourceUrl: url });
             return null;
         }
-        const dlUrl = data.download;
+        const dlUrl = res.data.download;
         const entry = {
-            name: data.filename,
+            name: res.data.filename,
             url: dlUrl,
-            size: formatBytes(data.filesize)
+            size: formatBytes(res.data.filesize)
         };
         if (State.settings.useUnrestrictCache) State.unrestrictCache.set(url, entry);
         addToHistory({
@@ -2722,13 +2728,13 @@ const Config = {
     }
 
     async function unrestrictLinkOrFolder(url, silent = false, filter = null, callback = null) {
-        const { ok, data, error } = await API.post('/unrestrict/link', { link: url });
-        if (ok && data && data.download) {
-            const dlUrl = data.download;
+        const res = await API.post('/unrestrict/link', { link: url });
+        if (res.ok && res.data && res.data.download) {
+            const dlUrl = res.data.download;
             addToHistory({
-                type: 'success', name: data.filename,
+                type: 'success', name: res.data.filename,
                 url: dlUrl, download: dlUrl,
-                size: formatBytes(data.filesize)
+                size: formatBytes(res.data.filesize)
             });
             if (!silent) applyDefaultAction(dlUrl);
             if (callback) callback(dlUrl);
@@ -2746,7 +2752,9 @@ const Config = {
             if (callback && firstUrl) callback(firstUrl);
             return firstUrl;
         }
-        addToHistory({ type: 'error', msg: 'Failed: ' + (error || 'Unknown error'), sourceUrl: url });
+        // Both endpoints failed — the direct-link attempt carries the
+        // meaningful diagnosis (the folder fallback is just a retry shape).
+        addToHistory({ type: 'error', msg: API.describeError(res, 'Could not unrestrict this link'), sourceUrl: url });
         if (callback) callback(null);
         return null;
     }
@@ -2802,14 +2810,14 @@ const Config = {
     }
 
     async function convertPoints() {
-        const { ok, error } = await API.post('/settings/convertPoints');
-        if (ok) {
+        const res = await API.post('/settings/convertPoints');
+        if (res.ok) {
             UI.showToast('Points converted! +30 days');
             State.userProfile = null;
             State.trafficData = null;
             if (State.currentTab === Config.TAB_KEYS.SETTINGS) Tabs.Settings.render();
         } else {
-            UI.showToast('Failed: ' + error, 'error');
+            UI.showToast(API.describeError(res, 'Points conversion failed'), 'error');
         }
     }
 
@@ -2920,14 +2928,14 @@ const Config = {
     }
 
     async function renameCloudItem(id, newName) {
-        const { ok, error } = await API.renameDownload(id, newName);
-        if (ok) {
+        const res = await API.renameDownload(id, newName);
+        if (res.ok) {
             const item = State.cachedCloud.find((c) => c.id === id);
             if (item) item.filename = newName;
             if (State.currentTab === Config.TAB_KEYS.CLOUD) Tabs.Cloud.refresh();
             UI.showToast('Renamed');
         } else {
-            UI.showToast('Rename failed: ' + error, 'error');
+            UI.showToast(API.describeError(res, 'Rename failed'), 'error');
         }
     }
 
@@ -3108,7 +3116,7 @@ const Config = {
             if (!files) {
                 const infoRes = await API.get('/torrents/info/' + torrentId);
                 if (!infoRes.ok || !infoRes.data || !infoRes.data.files) {
-                    UI.showToast('Could not load torrent files', 'error');
+                    UI.showToast(API.describeError(infoRes, 'Could not load torrent files'), 'error');
                     return;
                 }
                 files = infoRes.data.files;
@@ -4635,7 +4643,7 @@ const Subtitles = {
                             State.trafficDetails = res.data;
                             this.render();
                         } else {
-                            UI.showToast('Could not load traffic details', 'error');
+                            UI.showToast(API.describeError(res, 'Could not load traffic details'), 'error');
                         }
                     }
                 }));

@@ -243,7 +243,13 @@
                         if (!userRes.ok) {
                             Config.clearKey();
                             if (prevKey) Config.saveKey(prevKey);
-                            UI.showToast('Invalid API key — check and try again', 'error');
+                            // A rejected key is the expected failure; anything
+                            // else (network, server, rate limit) deserves its
+                            // own diagnosis instead of blaming the key.
+                            const msg = (userRes.errorType === 'auth' || userRes.errorType === 'http')
+                                ? 'Invalid API key — check and try again'
+                                : API.describeError(userRes, 'Could not verify API key');
+                            UI.showToast(msg, 'error');
                             return;
                         }
                         UI.showToast('API key saved! Reloading...');

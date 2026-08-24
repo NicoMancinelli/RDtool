@@ -103,7 +103,7 @@
                             State.trafficDetails = res.data;
                             this.render();
                         } else {
-                            UI.showToast('Could not load traffic details', 'error');
+                            UI.showToast(API.describeError(res, 'Could not load traffic details'), 'error');
                         }
                     }
                 }));
