@@ -14,7 +14,7 @@ Real-Debrid Suite turns any webpage into a Real-Debrid workstation. When the pag
 - **Links tab** — Paste, drag-and-drop, batch unrestrict, history, and export (plain / curl / wget)
 - **Torrents tab** — Live progress, speed/ETA, M3U export, bulk delete, dead torrent cleanup
 - **Cloud tab** — Real-Debrid download history with search, sort, and bulk actions
-- **Media player** — In-browser video/audio with PiP; deep links to VLC, IINA, Infuse
+- **Media player** — In-browser video/audio with PiP and sidecar subtitle support (.srt / .ass / .vtt, `C` to toggle); deep links to VLC, IINA, Infuse
 - **In-app updates** — Check for a newer release and install from GitHub in one click
 - **Mobile** — Bottom sheet UI, swipe dismiss, pull-to-refresh, long-press menus
 - **Liquid Glass UI** — Dark glassmorphism that stays readable on any page
