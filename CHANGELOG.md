@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [42.2] - 2026-08-24
+
+### Fixed
+- **Script failed to load** — after the v42.0 DOM hardening, `DOM.create(..., DOM.iconSvg(...))` passed a bare SVG node where an array of children was required, throwing `children is not iterable` during FAB/dashboard init for any user with an API key. `_appendChildren` now accepts a single Node, and the lightning icon call sites wrap it in an array.
+
 ## [42.1] - 2026-08-24
 
 ### Changed

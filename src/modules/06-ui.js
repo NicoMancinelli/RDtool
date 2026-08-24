@@ -193,7 +193,7 @@
                 fabAttrs.title = 'RD Suite (' + formatShortcut(State.settings.toggleShortcut) + ')';
             }
             const fab = DOM.create('div', fabAttrs, [
-                DOM.create('span', {}, DOM.iconSvg('lightning')),
+                DOM.create('span', {}, [DOM.iconSvg('lightning')]),
                 badge,
                 queueBadge
             ]);
@@ -356,7 +356,7 @@
             // Header
             const header = DOM.create('div', { className: 'rd-header' }, [
                 DOM.create('div', { style: 'display:flex;align-items:center;gap:8px;' }, [
-                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, DOM.iconSvg('lightning')),
+                    DOM.create('span', { style: 'display:flex;color:var(--rd-accent);' }, [DOM.iconSvg('lightning')]),
                     DOM.create('span', { textContent: 'RD Suite', style: 'font-weight:bold;font-size:14px;color:var(--rd-text-primary);' }),
                     DOM.create('span', {
                         id: 'rd-version-badge',
