@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning track
 
 ## [Unreleased]
 
+## [42.3] - 2026-09-21
+
+### Fixed
+- **Inline ⚡ spam on provider file pages** — Real-Debrid's `/hosts/regex` uses path catch-alls for many hosts (`mediafire.com/*`, `mega.nz/*`, `nitroflare.com/*`, …). On those download pages every same-site nav/login/upgrade link matched and got an icon. Same-site host links are now skipped while you are on a host file page; the top-right **Download via RD** control still targets the page URL, and cross-host mirrors keep their icons.
+
 ## [42.2] - 2026-08-24
 
 ### Fixed

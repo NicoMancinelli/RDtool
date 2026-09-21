@@ -129,6 +129,84 @@ describe('Scanner.isScannableHref — Rapidgator # clutter', () => {
     });
 });
 
+describe('Scanner same-site host skip on file pages', () => {
+    let Config;
+    let Scanner;
+
+    function loadSameSiteHelpers(ConfigRef) {
+        globalThis.Config = ConfigRef;
+        const patterns = [
+            'isHostFilePageUrl\\(url\\) \\{[\\s\\S]*?\\n {4}\\},',
+            'normalizeHost\\(hostname\\) \\{[\\s\\S]*?\\n {4}\\},',
+            'isSameSiteHost\\(urlA, urlB\\) \\{[\\s\\S]*?\\n {4}\\},',
+            'shouldSkipHostLinkOnFilePage\\(linkUrl, pageUrl\\) \\{[\\s\\S]*?\\n {4}\\},'
+        ];
+        const methods = patterns.map((p) => {
+            const m = scannerSrc.match(new RegExp(p));
+            if (!m) throw new Error('Scanner method not found: ' + p);
+            return m[0];
+        }).join('\n    ');
+        const fn = new Function(`
+            const Config = globalThis.Config;
+            const Scanner = { ${methods} };
+            return Scanner;
+        `);
+        return fn();
+    }
+
+    beforeEach(() => {
+        Config = loadConfig();
+        // Simulate RD API catch-all for mediafire (the real /hosts/regex shape).
+        globalThis.State = {
+            settings: { useApiHostRegex: true },
+            dynamicHosts: [],
+            apiHostRegex: /(?:https?):\/\/(?:\w+\.)?mediafire\.com\/([^( |"|'|>|<|\r\n|\r|\n|:|$)]+)/i
+        };
+        Config.hostRegex = Config.getActiveRegex();
+        Scanner = loadSameSiteHelpers(Config);
+    });
+
+    it('normalizeHost strips www and lowercases', () => {
+        expect(Scanner.normalizeHost('www.MediaFire.com')).toBe('mediafire.com');
+        expect(Scanner.normalizeHost('mediafire.com')).toBe('mediafire.com');
+    });
+
+    it('isSameSiteHost is www-insensitive', () => {
+        expect(Scanner.isSameSiteHost(
+            'https://www.mediafire.com/file/abc123456789012/x',
+            'https://mediafire.com/upgrade'
+        )).toBe(true);
+        expect(Scanner.isSameSiteHost(
+            'https://mediafire.com/file/abc123456789012/x',
+            'https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x'
+        )).toBe(false);
+    });
+
+    it('skips same-site chrome links when on a mediafire file page', () => {
+        const page = 'https://www.mediafire.com/file/abc123456789012/movie.mkv';
+        expect(Scanner.isHostFilePageUrl(page)).toBe(true);
+        expect(Scanner.shouldSkipHostLinkOnFilePage('https://www.mediafire.com/upgrade', page)).toBe(true);
+        expect(Scanner.shouldSkipHostLinkOnFilePage('https://mediafire.com/login', page)).toBe(true);
+        expect(Scanner.shouldSkipHostLinkOnFilePage('https://www.mediafire.com/file/abc123456789012/movie.mkv?x=1', page)).toBe(true);
+    });
+
+    it('still allows cross-host mirrors on a file page', () => {
+        const page = 'https://www.mediafire.com/file/abc123456789012/movie.mkv';
+        expect(Scanner.shouldSkipHostLinkOnFilePage(
+            'https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x',
+            page
+        )).toBe(false);
+    });
+
+    it('does not skip same-site links when the tab is not a host file page', () => {
+        const page = 'https://forum.example/thread/1';
+        expect(Scanner.shouldSkipHostLinkOnFilePage(
+            'https://www.mediafire.com/file/abc123456789012/movie.mkv',
+            page
+        )).toBe(false);
+    });
+});
+
 describe('Config.getActiveRegex — no bare dynamicHosts for BASE domains', () => {
     let Config;
 

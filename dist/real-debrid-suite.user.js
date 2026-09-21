@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Real-Debrid Suite
 // @namespace    http://tampermonkey.net/
-// @version      42.2
+// @version      42.3
 // @updateURL    https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @downloadURL  https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js
 // @description  The ultimate RD tool. Liquid Glass UI, Cloud Management, Smart Magnets, PiP Media Player, Mobile Support.
@@ -1016,7 +1016,7 @@ GM_addStyle(`:root {
 // =========================================================================
 
 const Config = {
-  VERSION: "42.2",
+  VERSION: "42.3",
   SETTINGS_VERSION: 2,
   UPDATE_URL:
     "https://github.com/NicoMancinelli/RDtool/raw/main/dist/real-debrid-suite.user.js",
@@ -5153,6 +5153,16 @@ const Scanner = {
                 newFound = true;
             } else if (Config.hostRegex && Config.hostRegex.test(url) && !link.querySelector('img')) {
                 link.classList.add('rd-processed');
+
+                // On a hoster's own file page, same-site anchors are usually UI
+                // chrome (login, premium, related, share). RD's /hosts/regex is
+                // often path-catch-all (mediafire.com/*, mega.nz/*, …), so those
+                // would all get ⚡ icons. Download via RD already targets the
+                // page URL; still icon cross-host mirrors.
+                if (this.shouldSkipHostLinkOnFilePage(url, pageUrlNoHash)) {
+                    continue;
+                }
+
                 // Check host status
                 const hostMatch = url.match(Scanner._HOST_RE);
                 if (!hostMatch) continue;
@@ -5212,6 +5222,30 @@ const Scanner = {
         const clean = url.split('#')[0];
         if (!/^https?:/i.test(clean)) return false;
         return Config.hostRegex.test(clean);
+    },
+
+    /** Hostname without leading www, lowercased. */
+    normalizeHost(hostname) {
+        return String(hostname || '').replace(/^www\./i, '').toLowerCase();
+    },
+
+    /** True when two absolute URLs share a site host (www-insensitive). */
+    isSameSiteHost(urlA, urlB) {
+        try {
+            return this.normalizeHost(new URL(urlA).hostname)
+                === this.normalizeHost(new URL(urlB).hostname);
+        } catch (_) {
+            return false;
+        }
+    },
+
+    /**
+     * On a host file page, skip same-site host links for icons / Page tab
+     * (API regex catch-alls paint ⚡ on every nav link otherwise).
+     */
+    shouldSkipHostLinkOnFilePage(linkUrl, pageUrl) {
+        if (!pageUrl || !this.isHostFilePageUrl(pageUrl)) return false;
+        return this.isSameSiteHost(linkUrl, pageUrl);
     },
 
     /** True when the page has something RD can act on (host / magnet / torrent). */
