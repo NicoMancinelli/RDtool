@@ -259,7 +259,16 @@ const Scanner = {
         if (!url || !Config.hostRegex) return false;
         const clean = url.split('#')[0];
         if (!/^https?:/i.test(clean)) return false;
-        return Config.hostRegex.test(clean);
+        if (Config.hostRegex.test(clean)) return true;
+        // RD /hosts/regex never includes :port; strip it for proxy/dev harnesses.
+        try {
+            const u = new URL(clean);
+            if (u.port) {
+                u.port = '';
+                return Config.hostRegex.test(u.toString());
+            }
+        } catch (_) { /* invalid URL */ }
+        return false;
     },
 
     /** Hostname without leading www, lowercased. */

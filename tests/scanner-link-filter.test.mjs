@@ -101,6 +101,10 @@ describe('Scanner.isHostFilePageUrl — host file tab detection', () => {
         expect(isHostFilePageUrl('https://example.com/page')).toBe(false);
         expect(isHostFilePageUrl('')).toBe(false);
     });
+
+    it('matches host file URLs even when a non-default port is present', () => {
+        expect(isHostFilePageUrl('http://www.mediafire.com:8765/file/abc123456789012/movie.mkv')).toBe(true);
+    });
 });
 
 describe('Scanner.isScannableHref — Rapidgator # clutter', () => {
@@ -188,6 +192,16 @@ describe('Scanner same-site host skip on file pages', () => {
         expect(Scanner.shouldSkipHostLinkOnFilePage('https://www.mediafire.com/upgrade', page)).toBe(true);
         expect(Scanner.shouldSkipHostLinkOnFilePage('https://mediafire.com/login', page)).toBe(true);
         expect(Scanner.shouldSkipHostLinkOnFilePage('https://www.mediafire.com/file/abc123456789012/movie.mkv?x=1', page)).toBe(true);
+    });
+
+    it('treats host file pages with :port as file pages for skip logic', () => {
+        const page = 'http://www.mediafire.com:8765/file/abc123456789012/movie.mkv';
+        expect(Scanner.isHostFilePageUrl(page)).toBe(true);
+        expect(Scanner.shouldSkipHostLinkOnFilePage('https://www.mediafire.com/upgrade', page)).toBe(true);
+        expect(Scanner.shouldSkipHostLinkOnFilePage(
+            'https://rapidgator.net/file/8dea9e71ecacdcedc6a239f39537fa59/x',
+            page
+        )).toBe(false);
     });
 
     it('still allows cross-host mirrors on a file page', () => {
