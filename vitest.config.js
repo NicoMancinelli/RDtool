@@ -16,7 +16,8 @@ export default defineConfig({
         environmentMatchGlobs: [
             ['tests/media-jsdom*.test.mjs', 'jsdom'],
             ['tests/ui-jsdom*.test.mjs', 'jsdom'],
-            ['tests/init-jsdom*.test.mjs', 'jsdom']
+            ['tests/init-jsdom*.test.mjs', 'jsdom'],
+            ['tests/scanner-host-page-icons.test.mjs', 'jsdom']
         ]
     }
 });
